@@ -6903,6 +6903,7 @@ pub enum CopyImplementationError {
     FieldDoesNotImplementCopy(ast::Name),
     VariantDoesNotImplementCopy(ast::Name),
     TypeIsStructural,
+    TypeHasDestructor,
 }
 
 pub fn can_type_implement_copy<'a,'tcx>(param_env: &ParameterEnvironment<'a, 'tcx>,
@@ -6912,7 +6913,7 @@ pub fn can_type_implement_copy<'a,'tcx>(param_env: &ParameterEnvironment<'a, 'tc
 {
     let tcx = param_env.tcx;
 
-    match self_type.sty {
+    let did = match self_type.sty {
         ty::ty_struct(struct_did, substs) => {
             let fields = ty::struct_fields(tcx, struct_did, substs);
             for field in fields.iter() {
@@ -6920,6 +6921,7 @@ pub fn can_type_implement_copy<'a,'tcx>(param_env: &ParameterEnvironment<'a, 'tc
                     return Err(FieldDoesNotImplementCopy(field.name))
                 }
             }
+            struct_did
         }
         ty::ty_enum(enum_did, substs) => {
             let enum_variants = ty::enum_variants(tcx, enum_did);
@@ -6932,8 +6934,13 @@ pub fn can_type_implement_copy<'a,'tcx>(param_env: &ParameterEnvironment<'a, 'tc
                     }
                 }
             }
+            enum_did
         }
         _ => return Err(TypeIsStructural),
+    };
+
+    if ty::has_dtor(tcx, did) {
+        return Err(TypeHasDestructor)
     }
 
     Ok(())
