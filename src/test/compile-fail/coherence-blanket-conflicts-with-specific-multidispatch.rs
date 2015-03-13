@@ -8,7 +8,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::fmt::Show;
+use std::fmt::Debug;
 use std::default::Default;
 
 // Test that a blank impl for all T conflicts with an impl for some
@@ -26,11 +26,11 @@ impl<T> MyTrait<T> for T { //~ ERROR E0119
 
 #[derive(Clone)]
 struct MyType {
-    dummy: uint
+    dummy: usize
 }
 
 impl MyTrait<MyType> for MyType {
-    fn get(&self) -> uint { (*self).clone() }
+    fn get(&self) -> usize { (*self).clone() }
 }
 
 fn main() { }

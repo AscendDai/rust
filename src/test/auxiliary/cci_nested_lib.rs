@@ -8,6 +8,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![allow(unknown_features)]
+#![feature(box_syntax)]
 
 use std::cell::RefCell;
 
@@ -33,7 +35,7 @@ pub fn alist_get<A:Clone + 'static,
                  -> B {
     let eq_fn = lst.eq_fn;
     let data = lst.data.borrow();
-    for entry in (*data).iter() {
+    for entry in &(*data) {
         if eq_fn(entry.key.clone(), k.clone()) {
             return entry.value.clone();
         }

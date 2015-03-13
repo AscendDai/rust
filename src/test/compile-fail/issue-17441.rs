@@ -9,16 +9,20 @@
 // except according to those terms.
 
 fn main() {
-    let _foo = &[1u, 2] as [usize];
+    let _foo = &[1_usize, 2] as [usize];
     //~^ ERROR cast to unsized type: `&[usize; 2]` as `[usize]`
     //~^^ HELP consider using an implicit coercion to `&[usize]` instead
-    let _bar = box 1u as std::fmt::Show;
-    //~^ ERROR cast to unsized type: `Box<usize>` as `core::fmt::Show`
-    //~^^ HELP did you mean `Box<core::fmt::Show>`?
-    let _baz = 1u as std::fmt::Show;
-    //~^ ERROR cast to unsized type: `usize` as `core::fmt::Show`
+
+    // FIXME (#22405): Replace `Box::new` with `box` here when/if possible.
+    let _bar = Box::new(1_usize) as std::fmt::Debug;
+    //~^ ERROR cast to unsized type: `Box<usize>` as `core::fmt::Debug`
+    //~^^ HELP did you mean `Box<core::fmt::Debug>`?
+
+    let _baz = 1_usize as std::fmt::Debug;
+    //~^ ERROR cast to unsized type: `usize` as `core::fmt::Debug`
     //~^^ HELP consider using a box or reference as appropriate
-    let _quux = [1u, 2] as [usize];
+
+    let _quux = [1_usize, 2] as [usize];
     //~^ ERROR cast to unsized type: `[usize; 2]` as `[usize]`
     //~^^ HELP consider using a box or reference as appropriate
 }

@@ -8,10 +8,12 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![allow(deprecated)]
+
 use prelude::v1::*;
 
-use io::net::ip;
-use io::IoResult;
+use old_io::net::ip;
+use old_io::IoResult;
 use libc;
 use mem;
 use ptr;
@@ -67,9 +69,9 @@ impl TcpListener {
             -1 => Err(last_net_error()),
             _ => {
                 let (reader, writer) = try!(unsafe { sys::os::pipe() });
-                try!(set_nonblocking(reader.fd(), true));
-                try!(set_nonblocking(writer.fd(), true));
-                try!(set_nonblocking(self.fd(), true));
+                set_nonblocking(reader.fd(), true);
+                set_nonblocking(writer.fd(), true);
+                set_nonblocking(self.fd(), true);
                 Ok(TcpAcceptor {
                     inner: Arc::new(AcceptorInner {
                         listener: self,
@@ -135,10 +137,6 @@ impl TcpAcceptor {
         }
 
         Err(sys_common::eof())
-    }
-
-    pub fn socket_name(&mut self) -> IoResult<ip::SocketAddr> {
-        net::sockname(self.fd(), libc::getsockname)
     }
 
     pub fn set_timeout(&mut self, timeout: Option<u64>) {

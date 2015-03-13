@@ -38,18 +38,31 @@
 //! [win]: http://msdn.microsoft.com/en-us/library/windows/desktop/ms682010%28v=vs.85%29.aspx
 //! [ti]: https://en.wikipedia.org/wiki/Terminfo
 
+// Do not remove on snapshot creation. Needed for bootstrap. (Issue #22364)
+#![cfg_attr(stage0, feature(custom_attribute))]
 #![crate_name = "term"]
-#![experimental = "use the crates.io `term` library instead"]
+#![unstable(feature = "rustc_private",
+            reason = "use the crates.io `term` library instead")]
+#![staged_api]
 #![crate_type = "rlib"]
 #![crate_type = "dylib"]
 #![doc(html_logo_url = "http://www.rust-lang.org/logos/rust-logo-128x128-blk-v2.png",
        html_favicon_url = "http://www.rust-lang.org/favicon.ico",
        html_root_url = "http://doc.rust-lang.org/nightly/",
        html_playground_url = "http://play.rust-lang.org/")]
-
-#![allow(unknown_features)]
-#![feature(slicing_syntax)]
 #![deny(missing_docs)]
+
+#![feature(box_syntax)]
+#![feature(collections)]
+#![feature(int_uint)]
+#![feature(io)]
+#![feature(old_io)]
+#![feature(path)]
+#![feature(rustc_private)]
+#![feature(staged_api)]
+#![feature(std_misc)]
+#![feature(path_ext)]
+#![cfg_attr(windows, feature(libc))]
 
 #[macro_use] extern crate log;
 
@@ -57,7 +70,7 @@ pub use terminfo::TerminfoTerminal;
 #[cfg(windows)]
 pub use win::WinConsole;
 
-use std::io::IoResult;
+use std::old_io::IoResult;
 
 pub mod terminfo;
 
@@ -72,8 +85,8 @@ pub struct WriterWrapper {
 
 impl Writer for WriterWrapper {
     #[inline]
-    fn write(&mut self, buf: &[u8]) -> IoResult<()> {
-        self.wrapped.write(buf)
+    fn write_all(&mut self, buf: &[u8]) -> IoResult<()> {
+        self.wrapped.write_all(buf)
     }
 
     #[inline]
@@ -87,7 +100,7 @@ impl Writer for WriterWrapper {
 /// opened.
 pub fn stdout() -> Option<Box<Terminal<WriterWrapper> + Send>> {
     TerminfoTerminal::new(WriterWrapper {
-        wrapped: box std::io::stdout() as Box<Writer + Send>,
+        wrapped: box std::old_io::stdout() as Box<Writer + Send>,
     })
 }
 
@@ -96,14 +109,14 @@ pub fn stdout() -> Option<Box<Terminal<WriterWrapper> + Send>> {
 /// opened.
 pub fn stdout() -> Option<Box<Terminal<WriterWrapper> + Send>> {
     let ti = TerminfoTerminal::new(WriterWrapper {
-        wrapped: box std::io::stdout() as Box<Writer + Send>,
+        wrapped: box std::old_io::stdout() as Box<Writer + Send>,
     });
 
     match ti {
         Some(t) => Some(t),
         None => {
             WinConsole::new(WriterWrapper {
-                wrapped: box std::io::stdout() as Box<Writer + Send>,
+                wrapped: box std::old_io::stdout() as Box<Writer + Send>,
             })
         }
     }
@@ -114,7 +127,7 @@ pub fn stdout() -> Option<Box<Terminal<WriterWrapper> + Send>> {
 /// opened.
 pub fn stderr() -> Option<Box<Terminal<WriterWrapper> + Send>> {
     TerminfoTerminal::new(WriterWrapper {
-        wrapped: box std::io::stderr() as Box<Writer + Send>,
+        wrapped: box std::old_io::stderr() as Box<Writer + Send>,
     })
 }
 
@@ -123,14 +136,14 @@ pub fn stderr() -> Option<Box<Terminal<WriterWrapper> + Send>> {
 /// opened.
 pub fn stderr() -> Option<Box<Terminal<WriterWrapper> + Send>> {
     let ti = TerminfoTerminal::new(WriterWrapper {
-        wrapped: box std::io::stderr() as Box<Writer + Send>,
+        wrapped: box std::old_io::stderr() as Box<Writer + Send>,
     });
 
     match ti {
         Some(t) => Some(t),
         None => {
             WinConsole::new(WriterWrapper {
-                wrapped: box std::io::stderr() as Box<Writer + Send>,
+                wrapped: box std::old_io::stderr() as Box<Writer + Send>,
             })
         }
     }
@@ -142,23 +155,23 @@ pub mod color {
     /// Number for a terminal color
     pub type Color = u16;
 
-    pub const BLACK:   Color = 0u16;
-    pub const RED:     Color = 1u16;
-    pub const GREEN:   Color = 2u16;
-    pub const YELLOW:  Color = 3u16;
-    pub const BLUE:    Color = 4u16;
-    pub const MAGENTA: Color = 5u16;
-    pub const CYAN:    Color = 6u16;
-    pub const WHITE:   Color = 7u16;
+    pub const BLACK:   Color = 0;
+    pub const RED:     Color = 1;
+    pub const GREEN:   Color = 2;
+    pub const YELLOW:  Color = 3;
+    pub const BLUE:    Color = 4;
+    pub const MAGENTA: Color = 5;
+    pub const CYAN:    Color = 6;
+    pub const WHITE:   Color = 7;
 
-    pub const BRIGHT_BLACK:   Color = 8u16;
-    pub const BRIGHT_RED:     Color = 9u16;
-    pub const BRIGHT_GREEN:   Color = 10u16;
-    pub const BRIGHT_YELLOW:  Color = 11u16;
-    pub const BRIGHT_BLUE:    Color = 12u16;
-    pub const BRIGHT_MAGENTA: Color = 13u16;
-    pub const BRIGHT_CYAN:    Color = 14u16;
-    pub const BRIGHT_WHITE:   Color = 15u16;
+    pub const BRIGHT_BLACK:   Color = 8;
+    pub const BRIGHT_RED:     Color = 9;
+    pub const BRIGHT_GREEN:   Color = 10;
+    pub const BRIGHT_YELLOW:  Color = 11;
+    pub const BRIGHT_BLUE:    Color = 12;
+    pub const BRIGHT_MAGENTA: Color = 13;
+    pub const BRIGHT_CYAN:    Color = 14;
+    pub const BRIGHT_WHITE:   Color = 15;
 }
 
 /// Terminal attributes

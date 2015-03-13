@@ -1,4 +1,4 @@
-// Copyright 2012 The Rust Project Developers. See the COPYRIGHT
+// Copyright 2012-2015 The Rust Project Developers. See the COPYRIGHT
 // file at the top-level directory of this distribution and at
 // http://rust-lang.org/COPYRIGHT.
 //
@@ -41,36 +41,14 @@
 //include valgrind.h after stdint.h so that uintptr_t is defined for msys2 w64
 #include "valgrind/valgrind.h"
 
-#ifdef __ANDROID__
-time_t
-timegm(struct tm *tm)
-{
-    time_t ret;
-    char *tz;
-
-    tz = getenv("TZ");
-    if (tz)
-        tz = strdup(tz);
-    setenv("TZ", "", 1);
-    tzset();
-    ret = mktime(tm);
-    if (tz) {
-        setenv("TZ", tz, 1);
-        free(tz);
-    } else
-        unsetenv("TZ");
-    tzset();
-    return ret;
-}
-#endif
-
 #ifdef __APPLE__
 #if (TARGET_OS_IPHONE)
 extern char **environ;
 #endif
 #endif
 
-#if defined(__FreeBSD__) || defined(__linux__) || defined(__ANDROID__) || defined(__DragonFly__)
+#if defined(__FreeBSD__) || defined(__linux__) || defined(__ANDROID__) || \
+    defined(__DragonFly__) || defined(__Bitrig__) || defined(__OpenBSD__)
 extern char **environ;
 #endif
 
@@ -99,121 +77,6 @@ rust_list_dir_val(struct dirent* entry_ptr) {
     return entry_ptr->d_name;
 }
 #endif
-
-typedef struct {
-    int32_t tm_sec;
-    int32_t tm_min;
-    int32_t tm_hour;
-    int32_t tm_mday;
-    int32_t tm_mon;
-    int32_t tm_year;
-    int32_t tm_wday;
-    int32_t tm_yday;
-    int32_t tm_isdst;
-    int32_t tm_gmtoff;
-    int32_t tm_nsec;
-} rust_tm;
-
-void rust_tm_to_tm(rust_tm* in_tm, struct tm* out_tm) {
-    memset(out_tm, 0, sizeof(struct tm));
-    out_tm->tm_sec = in_tm->tm_sec;
-    out_tm->tm_min = in_tm->tm_min;
-    out_tm->tm_hour = in_tm->tm_hour;
-    out_tm->tm_mday = in_tm->tm_mday;
-    out_tm->tm_mon = in_tm->tm_mon;
-    out_tm->tm_year = in_tm->tm_year;
-    out_tm->tm_wday = in_tm->tm_wday;
-    out_tm->tm_yday = in_tm->tm_yday;
-    out_tm->tm_isdst = in_tm->tm_isdst;
-}
-
-void tm_to_rust_tm(struct tm* in_tm,
-                   rust_tm* out_tm,
-                   int32_t gmtoff,
-                   int32_t nsec) {
-    out_tm->tm_sec = in_tm->tm_sec;
-    out_tm->tm_min = in_tm->tm_min;
-    out_tm->tm_hour = in_tm->tm_hour;
-    out_tm->tm_mday = in_tm->tm_mday;
-    out_tm->tm_mon = in_tm->tm_mon;
-    out_tm->tm_year = in_tm->tm_year;
-    out_tm->tm_wday = in_tm->tm_wday;
-    out_tm->tm_yday = in_tm->tm_yday;
-    out_tm->tm_isdst = in_tm->tm_isdst;
-    out_tm->tm_gmtoff = gmtoff;
-    out_tm->tm_nsec = nsec;
-}
-
-#if defined(__WIN32__)
-#define TZSET() _tzset()
-#if defined(_MSC_VER) && (_MSC_VER >= 1400)
-#define GMTIME(clock, result) gmtime_s((result), (clock))
-#define LOCALTIME(clock, result) localtime_s((result), (clock))
-#define TIMEGM(result) _mkgmtime64(result)
-#else
-struct tm* GMTIME(const time_t *clock, struct tm *result) {
-    struct tm* t = gmtime(clock);
-    if (t == NULL || result == NULL) { return NULL; }
-    *result = *t;
-    return result;
-}
-struct tm* LOCALTIME(const time_t *clock, struct tm *result) {
-    struct tm* t = localtime(clock);
-    if (t == NULL || result == NULL) { return NULL; }
-    *result = *t;
-    return result;
-}
-#define TIMEGM(result) mktime((result)) - _timezone
-#endif
-#else
-#define TZSET() tzset()
-#define GMTIME(clock, result) gmtime_r((clock), (result))
-#define LOCALTIME(clock, result) localtime_r((clock), (result))
-#define TIMEGM(result) timegm(result)
-#endif
-
-void
-rust_tzset() {
-    TZSET();
-}
-
-void
-rust_gmtime(int64_t sec, int32_t nsec, rust_tm *timeptr) {
-    struct tm tm;
-    time_t s = sec;
-    GMTIME(&s, &tm);
-
-    tm_to_rust_tm(&tm, timeptr, 0, nsec);
-}
-
-void
-rust_localtime(int64_t sec, int32_t nsec, rust_tm *timeptr) {
-    struct tm tm;
-    time_t s = sec;
-    LOCALTIME(&s, &tm);
-
-#if defined(__WIN32__)
-    int32_t gmtoff = -timezone;
-#else
-    int32_t gmtoff = tm.tm_gmtoff;
-#endif
-
-    tm_to_rust_tm(&tm, timeptr, gmtoff, nsec);
-}
-
-int64_t
-rust_timegm(rust_tm* timeptr) {
-    struct tm t;
-    rust_tm_to_tm(timeptr, &t);
-    return TIMEGM(&t);
-}
-
-int64_t
-rust_mktime(rust_tm* timeptr) {
-    struct tm t;
-    rust_tm_to_tm(timeptr, &t);
-    return mktime(&t);
-}
 
 #ifndef _WIN32
 
@@ -335,6 +198,332 @@ rust_unset_sigprocmask() {
 // In DragonFly __error() is an inline function and as such
 // no symbol exists for it.
 int *__dfly_error(void) { return __error(); }
+#endif
+
+#if defined(__Bitrig__)
+#include <stdio.h>
+#include <sys/param.h>
+#include <sys/sysctl.h>
+#include <limits.h>
+
+int rust_get_path(void *p, size_t* sz)
+{
+  int mib[4];
+  char *eq = NULL;
+  char *key = NULL;
+  char *val = NULL;
+  char **menv = NULL;
+  size_t maxlen, len;
+  int nenv = 0;
+  int i;
+
+  if ((p == NULL) && (sz == NULL))
+    return -1;
+
+  /* get the argv array */
+  mib[0] = CTL_KERN;
+  mib[1] = KERN_PROC_ARGS;
+  mib[2] = getpid();
+  mib[3] = KERN_PROC_ENV;
+
+  /* get the number of bytes needed to get the env */
+  maxlen = 0;
+  if (sysctl(mib, 4, NULL, &maxlen, NULL, 0) == -1)
+    return -1;
+
+  /* allocate the buffer */
+  if ((menv = calloc(maxlen, sizeof(char))) == NULL)
+    return -1;
+
+  /* get the env array */
+  if (sysctl(mib, 4, menv, &maxlen, NULL, 0) == -1)
+  {
+    free(menv);
+    return -1;
+  }
+
+  mib[3] = KERN_PROC_NENV;
+  len = sizeof(int);
+  /* get the length of env array */
+  if (sysctl(mib, 4, &nenv, &len, NULL, 0) == -1)
+  {
+    free(menv);
+    return -1;
+  }
+
+  /* find _ key and resolve the value */
+  for (i = 0; i < nenv; i++)
+  {
+    if ((eq = strstr(menv[i], "=")) == NULL)
+      continue;
+
+    key = menv[i];
+    val = eq + 1;
+    *eq = '\0';
+
+    if (strncmp(key, "PATH", maxlen) != 0)
+      continue;
+
+    if (p == NULL)
+    {
+      /* return the length of the value + NUL */
+      *sz = strnlen(val, maxlen) + 1;
+      free(menv);
+      return 0;
+    }
+    else
+    {
+      /* copy *sz bytes to the output buffer */
+      memcpy(p, val, *sz);
+      free(menv);
+      return 0;
+    }
+  }
+
+  free(menv);
+  return -1;
+}
+
+int rust_get_path_array(void * p, size_t * sz)
+{
+  char *path, *str;
+  char **buf;
+  int i, num;
+  size_t len;
+
+  if ((p == NULL) && (sz == NULL))
+    return -1;
+
+  /* get the length of the PATH value */
+  if (rust_get_path(NULL, &len) == -1)
+    return -1;
+
+  if (len == 0)
+    return -1;
+
+  /* allocate the buffer */
+  if ((path = calloc(len, sizeof(char))) == NULL)
+    return -1;
+
+  /* get the PATH value */
+  if (rust_get_path(path, &len) == -1)
+  {
+    free(path);
+    return -1;
+  }
+
+  /* count the number of parts in the PATH */
+  num = 1;
+  for(str = path; *str != '\0'; str++)
+  {
+    if (*str == ':')
+      num++;
+  }
+
+  /* calculate the size of the buffer for the 2D array */
+  len = (num * sizeof(char*) + 1) + strlen(path) + 1;
+
+  if (p == NULL)
+  {
+    free(path);
+    *sz = len;
+    return 0;
+  }
+
+  /* make sure we have enough buffer space */
+  if (*sz < len)
+  {
+    free(path);
+    return -1;
+  }
+
+  /* zero out the buffer */
+  buf = (char**)p;
+  memset(buf, 0, *sz);
+
+  /* copy the data into the right place */
+  str = p + ((num+1) * sizeof(char*));
+  memcpy(str, path, strlen(path));
+
+  /* parse the path into it's parts */
+  for (i = 0; i < num && (buf[i] = strsep(&str, ":")) != NULL; i++) {;}
+  buf[num] = NULL;
+
+  free(path);
+  return 0;
+}
+
+int rust_get_argv_zero(void* p, size_t* sz)
+{
+  int mib[4];
+  char **argv = NULL;
+  size_t len;
+
+  if ((p == NULL) && (sz == NULL))
+    return -1;
+
+  /* get the argv array */
+  mib[0] = CTL_KERN;
+  mib[1] = KERN_PROC_ARGS;
+  mib[2] = getpid();
+  mib[3] = KERN_PROC_ARGV;
+
+  /* request KERN_PROC_ARGV size */
+  len = 0;
+  if (sysctl(mib, 4, NULL, &len, NULL, 0) == -1)
+    return -1;
+
+  /* allocate buffer to receive the values */
+  if ((argv = malloc(len)) == NULL)
+    return -1;
+
+  /* get the argv array */
+  if (sysctl(mib, 4, argv, &len, NULL, 0) == -1)
+  {
+    free(argv);
+    return -1;
+  }
+
+  /* get length of argv[0] */
+  len = strnlen(argv[0], len) + 1;
+
+  if (p == NULL)
+  {
+    *sz = len;
+    free(argv);
+    return 0;
+  }
+
+  if (*sz < len)
+  {
+    free(argv);
+    return -1;
+  }
+
+  memset(p, 0, len);
+  memcpy(p, argv[0], len);
+  free(argv);
+  return 0;
+}
+
+const char * rust_current_exe()
+{
+  static char *self = NULL;
+  char *argv0;
+  char **paths;
+  size_t sz;
+  int i;
+  char buf[2*PATH_MAX], exe[2*PATH_MAX];
+
+  if (self != NULL)
+    return self;
+
+  if (rust_get_argv_zero(NULL, &sz) == -1)
+    return NULL;
+  if ((argv0 = calloc(sz, sizeof(char))) == NULL)
+    return NULL;
+  if (rust_get_argv_zero(argv0, &sz) == -1)
+  {
+    free(argv0);
+    return NULL;
+  }
+
+  /* if argv0 is a relative or absolute path, resolve it with realpath */
+  if ((*argv0 == '.') || (*argv0 == '/') || (strstr(argv0, "/") != NULL))
+  {
+    self = realpath(argv0, NULL);
+    free(argv0);
+    return self;
+  }
+
+  /* get the path array */
+  if (rust_get_path_array(NULL, &sz) == -1)
+  {
+    free(argv0);
+    return NULL;
+  }
+  if ((paths = calloc(sz, sizeof(char))) == NULL)
+  {
+    free(argv0);
+    return NULL;
+  }
+  if (rust_get_path_array(paths, &sz) == -1)
+  {
+    free(argv0);
+    free(paths);
+    return NULL;
+  }
+
+  for(i = 0; paths[i] != NULL; i++)
+  {
+    snprintf(buf, 2*PATH_MAX, "%s/%s", paths[i], argv0);
+    if (realpath(buf, exe) == NULL)
+      continue;
+
+    if (access(exe, F_OK | X_OK) == -1)
+      continue;
+
+    self = strdup(exe);
+    free(argv0);
+    free(paths);
+    return self;
+  }
+
+  free(argv0);
+  free(paths);
+  return NULL;
+}
+
+#elif defined(__OpenBSD__)
+
+#include <sys/param.h>
+#include <sys/sysctl.h>
+#include <limits.h>
+
+const char * rust_current_exe() {
+    static char *self = NULL;
+
+    if (self == NULL) {
+        int mib[4];
+        char **argv = NULL;
+        size_t argv_len;
+
+        /* initialize mib */
+        mib[0] = CTL_KERN;
+        mib[1] = KERN_PROC_ARGS;
+        mib[2] = getpid();
+        mib[3] = KERN_PROC_ARGV;
+
+        /* request KERN_PROC_ARGV size */
+        argv_len = 0;
+        if (sysctl(mib, 4, NULL, &argv_len, NULL, 0) == -1)
+            return (NULL);
+
+        /* allocate size */
+        if ((argv = malloc(argv_len)) == NULL)
+            return (NULL);
+
+        /* request KERN_PROC_ARGV */
+        if (sysctl(mib, 4, argv, &argv_len, NULL, 0) == -1) {
+            free(argv);
+            return (NULL);
+        }
+
+        /* get realpath if possible */
+        if ((argv[0] != NULL) && ((*argv[0] == '.') || (*argv[0] == '/')
+                                || (strstr(argv[0], "/") != NULL)))
+
+            self = realpath(argv[0], NULL);
+        else
+            self = NULL;
+
+        /* cleanup */
+        free(argv);
+    }
+
+    return (self);
+}
+
 #endif
 
 //

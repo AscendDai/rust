@@ -8,7 +8,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-// ignore-android: FIXME(#10381)
 // min-lldb-version: 310
 
 // Gdb doesn't know about UTF-32 character encoding and will print a rust char as only
@@ -112,6 +111,7 @@
 // lldb-check:[...]$12 = 3.5
 
 #![allow(unused_variables)]
+#![feature(box_syntax)]
 #![omit_gdb_pretty_printer_section]
 
 fn main() {

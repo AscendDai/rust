@@ -14,10 +14,15 @@
 
 */
 
+#![allow(unknown_features)]
+#![feature(box_syntax)]
 
 pub fn main() {}
 
-trait A {}
+trait A {
+    fn dummy(&self) { }
+}
+
 impl<T: 'static> A for T {}
 
 fn owned2<T: 'static>(a: Box<T>) { a as Box<A>; }

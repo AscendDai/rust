@@ -9,5 +9,5 @@
 // except according to those terms.
 
 pub fn main() {
-    let x = *box() ();
+    let x = *Box::new(());
 }

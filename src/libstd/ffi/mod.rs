@@ -10,11 +10,28 @@
 
 //! Utilities related to FFI bindings.
 
-#![unstable = "module just underwent fairly large reorganization and the dust \
-               still needs to settle"]
+#![stable(feature = "rust1", since = "1.0.0")]
 
-pub use self::c_str::CString;
+#[stable(feature = "rust1", since = "1.0.0")]
+pub use self::c_str::{CString, CStr};
+pub use self::c_str::{NulError, IntoBytes};
+#[allow(deprecated)]
 pub use self::c_str::c_str_to_bytes;
+#[allow(deprecated)]
 pub use self::c_str::c_str_to_bytes_with_nul;
 
+#[stable(feature = "rust1", since = "1.0.0")]
+pub use self::os_str::OsString;
+#[stable(feature = "rust1", since = "1.0.0")]
+pub use self::os_str::OsStr;
+
 mod c_str;
+mod os_str;
+
+// FIXME (#21670): these should be defined in the os_str module
+/// Freely convertible to an `&OsStr` slice.
+#[unstable(feature = "std_misc")]
+pub trait AsOsStr {
+    /// Convert to an `&OsStr` slice.
+    fn as_os_str(&self) -> &OsStr;
+}

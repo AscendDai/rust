@@ -8,6 +8,9 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![allow(unknown_features)]
+#![feature(box_syntax)]
+
 use std::cmp::PartialEq;
 
 fn sendable() {
@@ -20,11 +23,11 @@ fn sendable() {
         assert!(i != j);
     }
 
-    let i = box 100i;
-    let j = box 100i;
+    let i: Box<_> = box 100;
+    let j: Box<_> = box 100;
     f(i, j);
-    let i = box 100i;
-    let j = box 101i;
+    let i: Box<_> = box 100;
+    let j: Box<_> = box 101;
     g(i, j);
 }
 
@@ -38,11 +41,11 @@ fn copyable() {
         assert!(i != j);
     }
 
-    let i = box 100i;
-    let j = box 100i;
+    let i: Box<_> = box 100;
+    let j: Box<_> = box 100;
     f(i, j);
-    let i = box 100i;
-    let j = box 101i;
+    let i: Box<_> = box 100;
+    let j: Box<_> = box 101;
     g(i, j);
 }
 
@@ -56,11 +59,11 @@ fn noncopyable() {
         assert!(i != j);
     }
 
-    let i = box 100i;
-    let j = box 100i;
+    let i: Box<_> = box 100;
+    let j: Box<_> = box 100;
     f(i, j);
-    let i = box 100i;
-    let j = box 101i;
+    let i: Box<_> = box 100;
+    let j: Box<_> = box 101;
     g(i, j);
 }
 

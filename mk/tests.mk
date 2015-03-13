@@ -21,7 +21,7 @@ $(eval $(call RUST_CRATE,coretest))
 
 TEST_TARGET_CRATES = $(filter-out core unicode,$(TARGET_CRATES)) coretest
 TEST_DOC_CRATES = $(DOC_CRATES)
-TEST_HOST_CRATES = $(filter-out rustc_typeck rustc_borrowck rustc_resolve rustc_trans,\
+TEST_HOST_CRATES = $(filter-out rustc_typeck rustc_borrowck rustc_resolve rustc_trans rustc_lint,\
                      $(HOST_CRATES))
 TEST_CRATES = $(TEST_TARGET_CRATES) $(TEST_HOST_CRATES)
 
@@ -38,16 +38,9 @@ ifdef CHECK_IGNORED
   TESTARGS += --ignored
 endif
 
-TEST_BENCH =
-
 # Arguments to the cfail/rfail/rpass/bench tests
 ifdef CFG_VALGRIND
   CTEST_RUNTOOL = --runtool "$(CFG_VALGRIND)"
-  TEST_BENCH =
-endif
-
-ifdef PLEASE_BENCH
-  TEST_BENCH = --bench
 endif
 
 # Arguments to the perf tests
@@ -56,6 +49,11 @@ ifdef CFG_PERF_TOOL
 endif
 
 CTEST_TESTARGS := $(TESTARGS)
+
+# --bench is only relevant for crate tests, not for the compile tests
+ifdef PLEASE_BENCH
+  TESTARGS += --bench
+endif
 
 ifdef VERBOSE
   CTEST_TESTARGS += --verbose
@@ -109,14 +107,13 @@ endef
 $(foreach target,$(CFG_TARGET), \
   $(eval $(call DEF_TARGET_COMMANDS,$(target))))
 
-# Target platform specific variables
-# for arm-linux-androidabi
+# Target platform specific variables for android
 define DEF_ADB_DEVICE_STATUS
 CFG_ADB_DEVICE_STATUS=$(1)
 endef
 
 $(foreach target,$(CFG_TARGET), \
-  $(if $(findstring $(target),"arm-linux-androideabi"), \
+  $(if $(findstring android, $(target)), \
     $(if $(findstring adb,$(CFG_ADB)), \
       $(if $(findstring device,$(shell $(CFG_ADB) devices 2>/dev/null | grep -E '^[:_A-Za-z0-9-]+[[:blank:]]+device')), \
         $(info check: android device attached) \
@@ -137,23 +134,37 @@ $(info check: android device test dir $(CFG_ADB_TEST_DIR) ready \
  $(shell $(CFG_ADB) remount 1>/dev/null) \
  $(shell $(CFG_ADB) shell rm -r $(CFG_ADB_TEST_DIR) >/dev/null) \
  $(shell $(CFG_ADB) shell mkdir $(CFG_ADB_TEST_DIR)) \
- $(shell $(CFG_ADB) shell mkdir $(CFG_ADB_TEST_DIR)/tmp) \
  $(shell $(CFG_ADB) push $(S)src/etc/adb_run_wrapper.sh $(CFG_ADB_TEST_DIR) 1>/dev/null) \
- $(foreach crate,$(TARGET_CRATES), \
-    $(shell $(CFG_ADB) push $(TLIB2_T_arm-linux-androideabi_H_$(CFG_BUILD))/$(call CFG_LIB_GLOB_arm-linux-androideabi,$(crate)) \
-                    $(CFG_ADB_TEST_DIR))) \
- )
+ $(foreach target,$(CFG_TARGET), \
+  $(if $(findstring android, $(target)), \
+   $(shell $(CFG_ADB) shell mkdir $(CFG_ADB_TEST_DIR)/$(target)) \
+   $(foreach crate,$(TARGET_CRATES), \
+    $(shell $(CFG_ADB) push $(TLIB2_T_$(target)_H_$(CFG_BUILD))/$(call CFG_LIB_GLOB_$(target),$(crate)) \
+                    $(CFG_ADB_TEST_DIR)/$(target))), \
+ )))
 else
 CFG_ADB_TEST_DIR=
 endif
 
+# $(1) - name of doc test
+# $(2) - file of the test
+define DOCTEST
+DOC_NAMES := $$(DOC_NAMES) $(1)
+DOCFILE_$(1) := $(2)
+endef
+
+$(foreach doc,$(DOCS), \
+  $(eval $(call DOCTEST,md-$(doc),$(S)src/doc/$(doc).md)))
+$(foreach file,$(wildcard $(S)src/doc/trpl/*.md), \
+  $(eval $(call DOCTEST,$(file:$(S)src/doc/trpl/%.md=trpl-%),$(file))))
 
 ######################################################################
 # Main test targets
 ######################################################################
 
 # The main testing target. Tests lots of stuff.
-check: cleantmptestlogs cleantestlibs check-notidy tidy
+check: cleantmptestlogs cleantestlibs all check-stage2 tidy
+	$(Q)$(CFG_PYTHON) $(S)src/etc/check-summary.py tmp/*.log
 
 # As above but don't bother running tidy.
 check-notidy: cleantmptestlogs cleantestlibs all check-stage2
@@ -163,12 +174,12 @@ check-notidy: cleantmptestlogs cleantestlibs all check-stage2
 check-lite: cleantestlibs cleantmptestlogs \
 	$(foreach crate,$(TEST_TARGET_CRATES),check-stage2-$(crate)) \
 	check-stage2-rpass check-stage2-rpass-valgrind \
-	check-stage2-rfail check-stage2-cfail check-stage2-rmake
+	check-stage2-rfail check-stage2-cfail check-stage2-pfail check-stage2-rmake
 	$(Q)$(CFG_PYTHON) $(S)src/etc/check-summary.py tmp/*.log
 
 # Only check the 'reference' tests: rpass/cfail/rfail/rmake.
 check-ref: cleantestlibs cleantmptestlogs check-stage2-rpass check-stage2-rpass-valgrind \
-	check-stage2-rfail check-stage2-cfail check-stage2-rmake
+	check-stage2-rfail check-stage2-cfail check-stage2-pfail check-stage2-rmake
 	$(Q)$(CFG_PYTHON) $(S)src/etc/check-summary.py tmp/*.log
 
 # Only check the docs.
@@ -226,57 +237,24 @@ cleantestlibs:
 ######################################################################
 
 ifdef CFG_NOTIDY
+.PHONY: tidy
 tidy:
 else
 
-ALL_CS := $(wildcard $(S)src/rt/*.cpp \
-                     $(S)src/rt/*/*.cpp \
-                     $(S)src/rt/*/*/*.cpp \
-                     $(S)src/rustllvm/*.cpp)
-ALL_CS := $(filter-out $(S)src/rt/miniz.cpp \
-		       $(wildcard $(S)src/rt/hoedown/src/*.c) \
-		       $(wildcard $(S)src/rt/hoedown/bin/*.c) \
-	,$(ALL_CS))
-ALL_HS := $(wildcard $(S)src/rt/*.h \
-                     $(S)src/rt/*/*.h \
-                     $(S)src/rt/*/*/*.h \
-                     $(S)src/rustllvm/*.h)
-ALL_HS := $(filter-out $(S)src/rt/valgrind/valgrind.h \
-                       $(S)src/rt/valgrind/memcheck.h \
-                       $(S)src/rt/msvc/typeof.h \
-                       $(S)src/rt/msvc/stdint.h \
-                       $(S)src/rt/msvc/inttypes.h \
-		       $(wildcard $(S)src/rt/hoedown/src/*.h) \
-		       $(wildcard $(S)src/rt/hoedown/bin/*.h) \
-	,$(ALL_HS))
-
 # Run the tidy script in multiple parts to avoid huge 'echo' commands
-tidy:
+.PHONY: tidy
+tidy: tidy-basic tidy-binaries tidy-errors tidy-features
+
+endif
+
+.PHONY: tidy-basic
+tidy-basic:
 		@$(call E, check: formatting)
-		$(Q)find $(S)src -name '*.r[sc]' \
-		    -and -not -regex '^$(S)src/jemalloc.*' \
-		    -and -not -regex '^$(S)src/libuv.*' \
-		    -and -not -regex '^$(S)src/llvm.*' \
-		    -and -not -regex '^$(S)src/gyp.*' \
-		    -and -not -regex '^$(S)src/libbacktrace.*' \
-		    -print0 \
-		| xargs -0 -n 10 $(CFG_PYTHON) $(S)src/etc/tidy.py
-		$(Q)find $(S)src/etc -name '*.py' \
-		| xargs -n 10 $(CFG_PYTHON) $(S)src/etc/tidy.py
-		$(Q)find $(S)src/doc -name '*.js' \
-		| xargs -n 10 $(CFG_PYTHON) $(S)src/etc/tidy.py
-		$(Q)find $(S)src/etc -name '*.sh' \
-		| xargs -n 10 $(CFG_PYTHON) $(S)src/etc/tidy.py
-		$(Q)find $(S)src/etc -name '*.pl' \
-		| xargs -n 10 $(CFG_PYTHON) $(S)src/etc/tidy.py
-		$(Q)find $(S)src/etc -name '*.c' \
-		| xargs -n 10 $(CFG_PYTHON) $(S)src/etc/tidy.py
-		$(Q)find $(S)src/etc -name '*.h' \
-		| xargs -n 10 $(CFG_PYTHON) $(S)src/etc/tidy.py
-		$(Q)echo $(ALL_CS) \
-		| xargs -n 10 $(CFG_PYTHON) $(S)src/etc/tidy.py
-		$(Q)echo $(ALL_HS) \
-		| xargs -n 10 $(CFG_PYTHON) $(S)src/etc/tidy.py
+		$(Q) $(CFG_PYTHON) $(S)src/etc/tidy.py $(S)src/
+
+.PHONY: tidy-binaries
+tidy-binaries:
+		@$(call E, check: binaries)
 		$(Q)find $(S)src -type f -perm +a+x \
 		    -not -name '*.rs' -and -not -name '*.py' \
 		    -and -not -name '*.sh' \
@@ -292,7 +270,15 @@ tidy:
 		| grep '^$(S)src/rust-installer' -v \
 		| xargs $(CFG_PYTHON) $(S)src/etc/check-binaries.py
 
-endif
+.PHONY: tidy-errors
+tidy-errors:
+		@$(call E, check: extended errors)
+		$(Q) $(CFG_PYTHON) $(S)src/etc/errorck.py $(S)src/
+
+.PHONY: tidy-features
+tidy-features:
+		@$(call E, check: feature sanity)
+		$(Q) $(CFG_PYTHON) $(S)src/etc/featureck.py $(S)src/
 
 
 ######################################################################
@@ -305,6 +291,7 @@ check-stage$(1)-T-$(2)-H-$(3)-exec: \
 	check-stage$(1)-T-$(2)-H-$(3)-rpass-exec \
 	check-stage$(1)-T-$(2)-H-$(3)-rfail-exec \
 	check-stage$(1)-T-$(2)-H-$(3)-cfail-exec \
+	check-stage$(1)-T-$(2)-H-$(3)-pfail-exec \
     check-stage$(1)-T-$(2)-H-$(3)-rpass-valgrind-exec \
     check-stage$(1)-T-$(2)-H-$(3)-rpass-full-exec \
 	check-stage$(1)-T-$(2)-H-$(3)-cfail-full-exec \
@@ -339,8 +326,8 @@ check-stage$(1)-T-$(2)-H-$(3)-doc-crates-exec: \
            check-stage$(1)-T-$(2)-H-$(3)-doc-crate-$$(crate)-exec)
 
 check-stage$(1)-T-$(2)-H-$(3)-doc-exec: \
-        $$(foreach docname,$$(DOCS), \
-           check-stage$(1)-T-$(2)-H-$(3)-doc-$$(docname)-exec)
+        $$(foreach docname,$$(DOC_NAMES), \
+           check-stage$(1)-T-$(2)-H-$(3)-doc-$$(docname)-exec) \
 
 check-stage$(1)-T-$(2)-H-$(3)-pretty-exec: \
 	check-stage$(1)-T-$(2)-H-$(3)-pretty-rpass-exec \
@@ -402,20 +389,22 @@ check-stage$(1)-T-$(2)-H-$(3)-$(4)-exec: $$(call TEST_OK_FILE,$(1),$(2),$(3),$(4
 $$(call TEST_OK_FILE,$(1),$(2),$(3),$(4)): \
 		$(3)/stage$(1)/test/$(4)test-$(2)$$(X_$(2))
 	@$$(call E, run: $$<)
+	$$(Q)touch $$@.start_time
 	$$(Q)$$(call CFG_RUN_TEST_$(2),$$<,$(1),$(2),$(3)) $$(TESTARGS) \
 	    --logfile $$(call TEST_LOG_FILE,$(1),$(2),$(3),$(4)) \
 	    $$(call CRATE_TEST_EXTRA_ARGS,$(1),$(2),$(3),$(4)) \
-	    && touch $$@
+	    && touch -r $$@.start_time $$@ && rm $$@.start_time
 endef
 
-define DEF_TEST_CRATE_RULES_arm-linux-androideabi
+define DEF_TEST_CRATE_RULES_android
 check-stage$(1)-T-$(2)-H-$(3)-$(4)-exec: $$(call TEST_OK_FILE,$(1),$(2),$(3),$(4))
 
 $$(call TEST_OK_FILE,$(1),$(2),$(3),$(4)): \
 		$(3)/stage$(1)/test/$(4)test-$(2)$$(X_$(2))
 	@$$(call E, run: $$< via adb)
+	$$(Q)touch $$@.start_time
 	$$(Q)$(CFG_ADB) push $$< $(CFG_ADB_TEST_DIR)
-	$$(Q)$(CFG_ADB) shell '(cd $(CFG_ADB_TEST_DIR); LD_LIBRARY_PATH=. \
+	$$(Q)$(CFG_ADB) shell '(cd $(CFG_ADB_TEST_DIR); LD_LIBRARY_PATH=./$(2) \
 		./$$(notdir $$<) \
 		--logfile $(CFG_ADB_TEST_DIR)/check-stage$(1)-T-$(2)-H-$(3)-$(4).log \
 		$$(call CRATE_TEST_EXTRA_ARGS,$(1),$(2),$(3),$(4)) $(TESTARGS))' \
@@ -427,7 +416,7 @@ $$(call TEST_OK_FILE,$(1),$(2),$(3),$(4)): \
 	@if grep -q "result: ok" tmp/check-stage$(1)-T-$(2)-H-$(3)-$(4).tmp; \
 	then \
 		rm tmp/check-stage$(1)-T-$(2)-H-$(3)-$(4).tmp; \
-		touch $$@; \
+		touch -r $$@.start_time $$@ && rm $$@.start_time; \
 	else \
 		rm tmp/check-stage$(1)-T-$(2)-H-$(3)-$(4).tmp; \
 		exit 101; \
@@ -449,9 +438,9 @@ $(foreach host,$(CFG_HOST), \
    $(foreach crate, $(TEST_CRATES), \
     $(if $(findstring $(target),$(CFG_BUILD)), \
      $(eval $(call DEF_TEST_CRATE_RULES,$(stage),$(target),$(host),$(crate))), \
-     $(if $(findstring $(target),"arm-linux-androideabi"), \
+     $(if $(findstring android, $(target)), \
       $(if $(findstring $(CFG_ADB_DEVICE_STATUS),"true"), \
-       $(eval $(call DEF_TEST_CRATE_RULES_arm-linux-androideabi,$(stage),$(target),$(host),$(crate))), \
+       $(eval $(call DEF_TEST_CRATE_RULES_android,$(stage),$(target),$(host),$(crate))), \
        $(eval $(call DEF_TEST_CRATE_RULES_null,$(stage),$(target),$(host),$(crate))) \
       ), \
       $(eval $(call DEF_TEST_CRATE_RULES,$(stage),$(target),$(host),$(crate))) \
@@ -467,6 +456,7 @@ RPASS_FULL_RS := $(wildcard $(S)src/test/run-pass-fulldeps/*.rs)
 CFAIL_FULL_RS := $(wildcard $(S)src/test/compile-fail-fulldeps/*.rs)
 RFAIL_RS := $(wildcard $(S)src/test/run-fail/*.rs)
 CFAIL_RS := $(wildcard $(S)src/test/compile-fail/*.rs)
+PFAIL_RS := $(wildcard $(S)src/test/parse-fail/*.rs)
 BENCH_RS := $(wildcard $(S)src/test/bench/*.rs)
 PRETTY_RS := $(wildcard $(S)src/test/pretty/*.rs)
 DEBUGINFO_GDB_RS := $(wildcard $(S)src/test/debuginfo/*.rs)
@@ -484,6 +474,7 @@ RPASS_FULL_TESTS := $(RPASS_FULL_RS)
 CFAIL_FULL_TESTS := $(CFAIL_FULL_RS)
 RFAIL_TESTS := $(RFAIL_RS)
 CFAIL_TESTS := $(CFAIL_RS)
+PFAIL_TESTS := $(PFAIL_RS)
 BENCH_TESTS := $(BENCH_RS)
 PERF_TESTS := $(PERF_RS)
 PRETTY_TESTS := $(PRETTY_RS)
@@ -520,6 +511,11 @@ CTEST_SRC_BASE_cfail = compile-fail
 CTEST_BUILD_BASE_cfail = compile-fail
 CTEST_MODE_cfail = compile-fail
 CTEST_RUNTOOL_cfail = $(CTEST_RUNTOOL)
+
+CTEST_SRC_BASE_pfail = parse-fail
+CTEST_BUILD_BASE_pfail = parse-fail
+CTEST_MODE_pfail = parse-fail
+CTEST_RUNTOOL_pfail = $(CTEST_RUNTOOL)
 
 CTEST_SRC_BASE_bench = bench
 CTEST_BUILD_BASE_bench = bench
@@ -594,7 +590,7 @@ TEST_SREQ$(1)_T_$(2)_H_$(3) = \
 
 # The tests select when to use debug configuration on their own;
 # remove directive, if present, from CFG_RUSTC_FLAGS (issue #7898).
-CTEST_RUSTC_FLAGS := $$(subst --cfg ndebug,,$$(CFG_RUSTC_FLAGS))
+CTEST_RUSTC_FLAGS := $$(subst -C debug-assertions,,$$(subst -C debug-assertions=on,,$$(CFG_RUSTC_FLAGS)))
 
 # The tests cannot be optimized while the rest of the compiler is optimized, so
 # filter out the optimization (if any) from rustc and then figure out if we need
@@ -627,7 +623,6 @@ CTEST_COMMON_ARGS$(1)-T-$(2)-H-$(3) := \
 
 ifdef CFG_VALGRIND_RPASS
 ifdef GOOD_VALGRIND_$(2)
-$(info cfg: valgrind-path set to $(CFG_VALGRIND_RPASS))
 CTEST_COMMON_ARGS$(1)-T-$(2)-H-$(3) += --valgrind-path "$(CFG_VALGRIND_RPASS)"
 endif
 endif
@@ -644,6 +639,7 @@ CTEST_DEPS_rpass-full_$(1)-T-$(2)-H-$(3) = $$(RPASS_FULL_TESTS) $$(CSREQ$(1)_T_$
 CTEST_DEPS_cfail-full_$(1)-T-$(2)-H-$(3) = $$(CFAIL_FULL_TESTS) $$(CSREQ$(1)_T_$(3)_H_$(3)) $$(SREQ$(1)_T_$(2)_H_$(3))
 CTEST_DEPS_rfail_$(1)-T-$(2)-H-$(3) = $$(RFAIL_TESTS)
 CTEST_DEPS_cfail_$(1)-T-$(2)-H-$(3) = $$(CFAIL_TESTS)
+CTEST_DEPS_pfail_$(1)-T-$(2)-H-$(3) = $$(PFAIL_TESTS)
 CTEST_DEPS_bench_$(1)-T-$(2)-H-$(3) = $$(BENCH_TESTS)
 CTEST_DEPS_perf_$(1)-T-$(2)-H-$(3) = $$(PERF_TESTS)
 CTEST_DEPS_debuginfo-gdb_$(1)-T-$(2)-H-$(3) = $$(DEBUGINFO_GDB_TESTS)
@@ -696,10 +692,11 @@ $$(call TEST_OK_FILE,$(1),$(2),$(3),$(4)): \
 		$$(TEST_SREQ$(1)_T_$(2)_H_$(3)) \
                 $$(CTEST_DEPS_$(4)_$(1)-T-$(2)-H-$(3))
 	@$$(call E, run $(4) [$(2)]: $$<)
+	$$(Q)touch $$@.start_time
 	$$(Q)$$(call CFG_RUN_CTEST_$(2),$(1),$$<,$(3)) \
 		$$(CTEST_ARGS$(1)-T-$(2)-H-$(3)-$(4)) \
 		--logfile $$(call TEST_LOG_FILE,$(1),$(2),$(3),$(4)) \
-                && touch $$@
+                && touch -r $$@.start_time $$@ && rm $$@.start_time
 
 else
 
@@ -712,7 +709,7 @@ endif
 
 endef
 
-CTEST_NAMES = rpass rpass-valgrind rpass-full cfail-full rfail cfail bench perf debuginfo-gdb debuginfo-lldb codegen
+CTEST_NAMES = rpass rpass-valgrind rpass-full cfail-full rfail cfail pfail bench perf debuginfo-gdb debuginfo-lldb codegen
 
 $(foreach host,$(CFG_HOST), \
  $(eval $(foreach target,$(CFG_TARGET), \
@@ -756,10 +753,11 @@ $$(call TEST_OK_FILE,$(1),$(2),$(3),$(4)): \
 	        $$(PRETTY_DEPS_$(4)) \
 	        $$(PRETTY_DEPS$(1)_H_$(3)_$(4))
 	@$$(call E, run pretty-rpass [$(2)]: $$<)
+	$$(Q)touch $$@.start_time
 	$$(Q)$$(call CFG_RUN_CTEST_$(2),$(1),$$<,$(3)) \
 		$$(PRETTY_ARGS$(1)-T-$(2)-H-$(3)-$(4)) \
 		--logfile $$(call TEST_LOG_FILE,$(1),$(2),$(3),$(4)) \
-                && touch $$@
+                && touch -r $$@.start_time $$@ && rm $$@.start_time
 
 endef
 
@@ -795,17 +793,20 @@ check-stage$(1)-T-$(2)-H-$(3)-doc-$(4)-exec: $$(call TEST_OK_FILE,$(1),$(2),$(3)
 # rustdoc etc.
 ifeq ($(NO_REBUILD),)
 DOCTESTDEP_$(1)_$(2)_$(3)_$(4) = \
-	$$(D)/$(4).md \
+	$$(DOCFILE_$(4)) \
 	$$(TEST_SREQ$(1)_T_$(2)_H_$(3)) \
 	$$(RUSTDOC_EXE_$(1)_T_$(2)_H_$(3))
 else
-DOCTESTDEP_$(1)_$(2)_$(3)_$(4) = $$(D)/$(4).md
+DOCTESTDEP_$(1)_$(2)_$(3)_$(4) = $$(DOCFILE_$(4))
 endif
 
 ifeq ($(2),$$(CFG_BUILD))
 $$(call TEST_OK_FILE,$(1),$(2),$(3),doc-$(4)): $$(DOCTESTDEP_$(1)_$(2)_$(3)_$(4))
 	@$$(call E, run doc-$(4) [$(2)])
-	$$(Q)$$(RUSTDOC_$(1)_T_$(2)_H_$(3)) --cfg dox --test $$< --test-args "$$(TESTARGS)" && touch $$@
+	$$(Q)touch $$@.start_time
+	$$(Q)$$(RUSTDOC_$(1)_T_$(2)_H_$(3)) --cfg dox --test $$< \
+		--test-args "$$(TESTARGS)" && \
+		touch -r $$@.start_time $$@ && rm $$@.start_time
 else
 $$(call TEST_OK_FILE,$(1),$(2),$(3),doc-$(4)):
 	touch $$@
@@ -815,7 +816,7 @@ endef
 $(foreach host,$(CFG_HOST), \
  $(foreach target,$(CFG_TARGET), \
   $(foreach stage,$(STAGES), \
-   $(foreach docname,$(DOCS), \
+   $(foreach docname,$(DOC_NAMES), \
     $(eval $(call DEF_DOC_TEST,$(stage),$(target),$(host),$(docname)))))))
 
 # Crates
@@ -840,9 +841,11 @@ check-stage$(1)-T-$(2)-H-$(3)-doc-crate-$(4)-exec: \
 ifeq ($(2),$$(CFG_BUILD))
 $$(call TEST_OK_FILE,$(1),$(2),$(3),doc-crate-$(4)): $$(CRATEDOCTESTDEP_$(1)_$(2)_$(3)_$(4))
 	@$$(call E, run doc-crate-$(4) [$(2)])
+	$$(Q)touch $$@.start_time
 	$$(Q)CFG_LLVM_LINKAGE_FILE=$$(LLVM_LINKAGE_PATH_$(3)) \
 	    $$(RUSTDOC_$(1)_T_$(2)_H_$(3)) --test --cfg dox \
-	    	$$(CRATEFILE_$(4)) --test-args "$$(TESTARGS)" && touch $$@
+	        $$(CRATEFILE_$(4)) --test-args "$$(TESTARGS)" && \
+	        touch -r $$@.start_time $$@ && rm $$@.start_time
 else
 $$(call TEST_OK_FILE,$(1),$(2),$(3),doc-crate-$(4)):
 	touch $$@
@@ -870,6 +873,7 @@ TEST_GROUPS = \
 	cfail-full \
 	rfail \
 	cfail \
+	pfail \
 	bench \
 	perf \
 	rmake \
@@ -877,7 +881,7 @@ TEST_GROUPS = \
 	debuginfo-lldb \
 	codegen \
 	doc \
-	$(foreach docname,$(DOCS),doc-$(docname)) \
+	$(foreach docname,$(DOC_NAMES),doc-$(docname)) \
 	pretty \
 	pretty-rpass \
     pretty-rpass-valgrind \
@@ -946,7 +950,7 @@ $(foreach stage,$(STAGES), \
    $(eval $(call DEF_CHECK_FOR_STAGE_AND_HOSTS_AND_GROUP,$(stage),$(host),$(group))))))
 
 define DEF_CHECK_DOC_FOR_STAGE
-check-stage$(1)-docs: $$(foreach docname,$$(DOCS), \
+check-stage$(1)-docs: $$(foreach docname,$$(DOC_NAMES), \
                        check-stage$(1)-T-$$(CFG_BUILD)-H-$$(CFG_BUILD)-doc-$$(docname)) \
                      $$(foreach crate,$$(TEST_DOC_CRATES), \
                        check-stage$(1)-T-$$(CFG_BUILD)-H-$$(CFG_BUILD)-doc-crate-$$(crate))
@@ -988,6 +992,7 @@ $(3)/test/run-make/%-$(1)-T-$(2)-H-$(3).ok: \
 		$$(CSREQ$(1)_T_$(2)_H_$(3))
 	@rm -rf $(3)/test/run-make/$$*
 	@mkdir -p $(3)/test/run-make/$$*
+	$$(Q)touch $$@.start_time
 	$$(Q)$$(CFG_PYTHON) $(S)src/etc/maketest.py $$(dir $$<) \
         $$(MAKE) \
 	    $$(HBIN$(1)_H_$(3))/rustc$$(X_$(3)) \
@@ -998,8 +1003,9 @@ $(3)/test/run-make/%-$(1)-T-$(2)-H-$(3).ok: \
 	    $$(LD_LIBRARY_PATH_ENV_NAME$(1)_T_$(2)_H_$(3)) \
 	    "$$(LD_LIBRARY_PATH_ENV_HOSTDIR$(1)_T_$(2)_H_$(3))" \
 	    "$$(LD_LIBRARY_PATH_ENV_TARGETDIR$(1)_T_$(2)_H_$(3))" \
-	    $(1)
-	@touch $$@
+	    $(1) \
+	    $$(S)
+	@touch -r $$@.start_time $$@ && rm $$@.start_time
 else
 # FIXME #11094 - The above rule doesn't work right for multiple targets
 check-stage$(1)-T-$(2)-H-$(3)-rmake-exec:

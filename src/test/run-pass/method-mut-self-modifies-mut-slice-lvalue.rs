@@ -15,7 +15,7 @@
 use std::raw;
 use std::mem;
 use std::slice;
-use std::io::IoResult;
+use std::old_io::IoResult;
 
 trait MyWriter {
     fn my_write(&mut self, buf: &[u8]) -> IoResult<()>;
@@ -38,10 +38,10 @@ impl<'a> MyWriter for &'a mut [u8] {
 }
 
 fn main() {
-    let mut buf = [0_u8; 6];
+    let mut buf = [0; 6];
 
     {
-        let mut writer = buf.as_mut_slice();
+        let mut writer: &mut [_] = &mut buf;
         writer.my_write(&[0, 1, 2]).unwrap();
         writer.my_write(&[3, 4, 5]).unwrap();
     }

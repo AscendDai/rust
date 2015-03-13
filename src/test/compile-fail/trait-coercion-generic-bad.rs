@@ -8,7 +8,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-
 struct Struct {
     person: &'static str
 }
@@ -24,7 +23,8 @@ impl Trait<&'static str> for Struct {
 }
 
 fn main() {
-    let s: Box<Trait<isize>> = box Struct { person: "Fred" };
+    // FIXME (#22405): Replace `Box::new` with `box` here when/if possible.
+    let s: Box<Trait<isize>> = Box::new(Struct { person: "Fred" });
     //~^ ERROR the trait `Trait<isize>` is not implemented for the type `Struct`
     s.f(1);
 }

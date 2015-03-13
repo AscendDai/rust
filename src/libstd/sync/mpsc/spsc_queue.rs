@@ -33,15 +33,16 @@
 //! concurrently between two tasks. This data structure is safe to use and
 //! enforces the semantics that there is one pusher and one popper.
 
-#![experimental]
+#![unstable(feature = "std_misc")]
 
 use core::prelude::*;
 
+use alloc::boxed;
 use alloc::boxed::Box;
-use core::mem;
+use core::ptr;
 use core::cell::UnsafeCell;
 
-use sync::atomic::{AtomicPtr, AtomicUint, Ordering};
+use sync::atomic::{AtomicPtr, AtomicUsize, Ordering};
 
 // Node within the linked list queue of messages to send
 struct Node<T> {
@@ -68,9 +69,9 @@ pub struct Queue<T> {
 
     // Cache maintenance fields. Additions and subtractions are stored
     // separately in order to allow them to use nonatomic addition/subtraction.
-    cache_bound: uint,
-    cache_additions: AtomicUint,
-    cache_subtractions: AtomicUint,
+    cache_bound: usize,
+    cache_additions: AtomicUsize,
+    cache_subtractions: AtomicUsize,
 }
 
 unsafe impl<T: Send> Send for Queue<T> { }
@@ -80,9 +81,9 @@ unsafe impl<T: Send> Sync for Queue<T> { }
 impl<T: Send> Node<T> {
     fn new() -> *mut Node<T> {
         unsafe {
-            mem::transmute(box Node {
+            boxed::into_raw(box Node {
                 value: None,
-                next: AtomicPtr::new(0 as *mut Node<T>),
+                next: AtomicPtr::new(ptr::null_mut::<Node<T>>()),
             })
         }
     }
@@ -106,7 +107,7 @@ impl<T: Send> Queue<T> {
     ///               cache (if desired). If the value is 0, then the cache has
     ///               no bound. Otherwise, the cache will never grow larger than
     ///               `bound` (although the queue itself could be much larger.
-    pub unsafe fn new(bound: uint) -> Queue<T> {
+    pub unsafe fn new(bound: usize) -> Queue<T> {
         let n1 = Node::new();
         let n2 = Node::new();
         (*n1).next.store(n2, Ordering::Relaxed);
@@ -117,8 +118,8 @@ impl<T: Send> Queue<T> {
             first: UnsafeCell::new(n1),
             tail_copy: UnsafeCell::new(n1),
             cache_bound: bound,
-            cache_additions: AtomicUint::new(0),
-            cache_subtractions: AtomicUint::new(0),
+            cache_additions: AtomicUsize::new(0),
+            cache_subtractions: AtomicUsize::new(0),
         }
     }
 
@@ -131,7 +132,7 @@ impl<T: Send> Queue<T> {
             let n = self.alloc();
             assert!((*n).value.is_none());
             (*n).value = Some(t);
-            (*n).next.store(0 as *mut Node<T>, Ordering::Relaxed);
+            (*n).next.store(ptr::null_mut(), Ordering::Relaxed);
             (**self.head.get()).next.store(n, Ordering::Release);
             *self.head.get() = n;
         }
@@ -199,7 +200,7 @@ impl<T: Send> Queue<T> {
                           .next.store(next, Ordering::Relaxed);
                     // We have successfully erased all references to 'tail', so
                     // now we can safely drop it.
-                    let _: Box<Node<T>> = mem::transmute(tail);
+                    let _: Box<Node<T>> = Box::from_raw(tail);
                 }
             }
             return ret;
@@ -232,7 +233,7 @@ impl<T: Send> Drop for Queue<T> {
             let mut cur = *self.first.get();
             while !cur.is_null() {
                 let next = (*cur).next.load(Ordering::Relaxed);
-                let _n: Box<Node<T>> = mem::transmute(cur);
+                let _n: Box<Node<T>> = Box::from_raw(cur);
                 cur = next;
             }
         }
@@ -245,16 +246,16 @@ mod test {
 
     use sync::Arc;
     use super::Queue;
-    use thread::Thread;
+    use thread;
     use sync::mpsc::channel;
 
     #[test]
     fn smoke() {
         unsafe {
             let queue = Queue::new(0);
-            queue.push(1i);
+            queue.push(1);
             queue.push(2);
-            assert_eq!(queue.pop(), Some(1i));
+            assert_eq!(queue.pop(), Some(1));
             assert_eq!(queue.pop(), Some(2));
             assert_eq!(queue.pop(), None);
             queue.push(3);
@@ -269,11 +270,11 @@ mod test {
     fn peek() {
         unsafe {
             let queue = Queue::new(0);
-            queue.push(vec![1i]);
+            queue.push(vec![1]);
 
             // Ensure the borrowchecker works
             match queue.peek() {
-                Some(vec) => match vec.as_slice() {
+                Some(vec) => match &**vec {
                     // Note that `pop` is not allowed here due to borrow
                     [1] => {}
                     _ => return
@@ -288,9 +289,9 @@ mod test {
     #[test]
     fn drop_full() {
         unsafe {
-            let q = Queue::new(0);
-            q.push(box 1i);
-            q.push(box 2i);
+            let q: Queue<Box<_>> = Queue::new(0);
+            q.push(box 1);
+            q.push(box 2);
         }
     }
 
@@ -298,7 +299,7 @@ mod test {
     fn smoke_bound() {
         unsafe {
             let q = Queue::new(0);
-            q.push(1i);
+            q.push(1);
             q.push(2);
             assert_eq!(q.pop(), Some(1));
             assert_eq!(q.pop(), Some(2));
@@ -318,16 +319,16 @@ mod test {
             stress_bound(1);
         }
 
-        unsafe fn stress_bound(bound: uint) {
+        unsafe fn stress_bound(bound: usize) {
             let q = Arc::new(Queue::new(bound));
 
             let (tx, rx) = channel();
             let q2 = q.clone();
-            let _t = Thread::spawn(move|| {
-                for _ in range(0u, 100000) {
+            let _t = thread::spawn(move|| {
+                for _ in 0..100000 {
                     loop {
                         match q2.pop() {
-                            Some(1i) => break,
+                            Some(1) => break,
                             Some(_) => panic!(),
                             None => {}
                         }
@@ -335,7 +336,7 @@ mod test {
                 }
                 tx.send(()).unwrap();
             });
-            for _ in range(0i, 100000) {
+            for _ in 0..100000 {
                 q.push(1);
             }
             rx.recv().unwrap();

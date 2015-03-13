@@ -8,22 +8,22 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::fmt::Show;
+use std::fmt::Debug;
 use std::default::Default;
 
 // Test that a blank impl for all T conflicts with an impl for some
 // specific T.
 
 trait MyTrait {
-    fn get(&self) -> uint;
+    fn get(&self) -> usize;
 }
 
 impl<T> MyTrait for (T,T) { //~ ERROR E0119
-    fn get(&self) -> uint { 0 }
+    fn get(&self) -> usize { 0 }
 }
 
 impl<A,B> MyTrait for (A,B) {
-    fn get(&self) -> uint { self.dummy }
+    fn get(&self) -> usize { self.dummy }
 }
 
 fn main() { }

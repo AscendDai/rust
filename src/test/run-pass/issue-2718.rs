@@ -31,7 +31,7 @@ pub mod pipes {
         payload: Option<T>
     }
 
-    #[derive(PartialEq, Show)]
+    #[derive(PartialEq, Debug)]
     #[repr(int)]
     pub enum state {
         empty,
@@ -50,11 +50,11 @@ pub mod pipes {
 
     pub fn packet<T:Send>() -> *const packet<T> {
         unsafe {
-            let p: *const packet<T> = mem::transmute(box Stuff{
+            let p: *const packet<T> = mem::transmute(Box::new(Stuff{
                 state: empty,
                 blocked_task: None::<Task>,
                 payload: None::<T>
-            });
+            }));
             p
         }
     }

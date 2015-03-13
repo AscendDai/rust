@@ -10,6 +10,9 @@
 
 // Test method calls with self as an argument (cross-crate)
 
+#![allow(unknown_features)]
+#![feature(box_syntax)]
+
 // aux-build:method_self_arg1.rs
 extern crate method_self_arg1;
 use method_self_arg1::Foo;
@@ -23,5 +26,5 @@ fn main() {
 
     x.foo(&x);
 
-    assert!(method_self_arg1::get_count() == 2u64*3*3*3*5*5*5*7*7*7);
+    assert!(method_self_arg1::get_count() == 2*3*3*3*5*5*5*7*7*7);
 }

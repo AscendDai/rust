@@ -11,13 +11,12 @@
 // A reduced version of the rustbook ice. The problem this encountered
 // had to do with trans ignoring binders.
 
-#![feature(slicing_syntax)]
 #![feature(associated_types)]
 #![feature(macro_rules)]
 
 use std::iter;
 use std::os;
-use std::io::File;
+use std::old_io::File;
 
 #[allow(unused)]
 pub fn parse_summary<R: Reader>(_: R, _: &Path) {

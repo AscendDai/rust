@@ -8,33 +8,36 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-struct Foo(Box<int>, int);
+#![allow(unknown_features)]
+#![feature(box_syntax)]
 
-struct Bar(int, int);
+struct Foo(Box<isize>, isize);
+
+struct Bar(isize, isize);
 
 fn main() {
-    let x = (box 1i, 2i);
+    let x: (Box<_>, _) = (box 1, 2);
     let r = &x.0;
     let y = x; //~ ERROR cannot move out of `x` because it is borrowed
 
-    let mut x = (1i, 2i);
+    let mut x = (1, 2);
     let a = &x.0;
     let b = &mut x.0; //~ ERROR cannot borrow `x.0` as mutable because it is also borrowed as
 
-    let mut x = (1i, 2i);
+    let mut x = (1, 2);
     let a = &mut x.0;
     let b = &mut x.0; //~ ERROR cannot borrow `x.0` as mutable more than once at a time
 
 
-    let x = Foo(box 1i, 2i);
+    let x = Foo(box 1, 2);
     let r = &x.0;
     let y = x; //~ ERROR cannot move out of `x` because it is borrowed
 
-    let mut x = Bar(1i, 2i);
+    let mut x = Bar(1, 2);
     let a = &x.0;
     let b = &mut x.0; //~ ERROR cannot borrow `x.0` as mutable because it is also borrowed as
 
-    let mut x = Bar(1i, 2i);
+    let mut x = Bar(1, 2);
     let a = &mut x.0;
     let b = &mut x.0; //~ ERROR cannot borrow `x.0` as mutable more than once at a time
 }

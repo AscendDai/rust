@@ -7,8 +7,24 @@
 // <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
-#![feature(globs, unsafe_destructor, slicing_syntax, default_type_params)]
+
+// Do not remove on snapshot creation. Needed for bootstrap. (Issue #22364)
+#![cfg_attr(stage0, feature(custom_attribute))]
+#![feature(box_syntax)]
+#![feature(int_uint)]
 #![feature(unboxed_closures)]
+#![feature(unsafe_destructor)]
+#![feature(core)]
+#![feature(test)]
+#![feature(rand)]
+#![feature(unicode)]
+#![feature(std_misc)]
+#![feature(libc)]
+#![feature(hash)]
+#![feature(io)]
+#![feature(collections)]
+#![feature(debug_builders)]
+#![allow(deprecated)] // rand
 
 extern crate core;
 extern crate test;

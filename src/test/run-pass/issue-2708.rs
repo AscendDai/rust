@@ -8,6 +8,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![allow(unknown_features)]
+#![feature(box_syntax)]
 
 struct Font {
     fontbuf: uint,
@@ -29,5 +31,5 @@ fn Font() -> Font {
 }
 
 pub fn main() {
-    let _f = box Font();
+    let _f: Box<_> = box Font();
 }

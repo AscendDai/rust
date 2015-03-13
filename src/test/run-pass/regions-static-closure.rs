@@ -8,6 +8,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![allow(unknown_features)]
+#![feature(box_syntax)]
 #![feature(unboxed_closures)]
 
 struct closure_box<'a> {
@@ -23,6 +25,7 @@ fn call_static_closure(mut cl: closure_box<'static>) {
 }
 
 pub fn main() {
-    let cl_box = box_it(box |&mut:| println!("Hello, world!"));
+    // FIXME (#22405): Replace `Box::new` with `box` here when/if possible.
+    let cl_box = box_it(Box::new(|| println!("Hello, world!")));
     call_static_closure(cl_box);
 }

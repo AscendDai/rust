@@ -8,15 +8,17 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-struct Foo { a: int, b: int }
+#![feature(box_syntax)]
+
+struct Foo { a: isize, b: isize }
 
 fn main() {
-    let mut x = box Foo { a: 1, b: 2 };
+    let mut x: Box<_> = box Foo { a: 1, b: 2 };
     let (a, b) = (&mut x.a, &mut x.b);
     //~^ ERROR cannot borrow `x` (here through borrowing `x.b`) as mutable more than once at a time
     //~^^ NOTE previous borrow of `x` occurs here (through borrowing `x.a`)
 
-    let mut foo = box Foo { a: 1, b: 2 };
+    let mut foo: Box<_> = box Foo { a: 1, b: 2 };
     let (c, d) = (&mut foo.a, &foo.b);
     //~^ ERROR cannot borrow `foo` (here through borrowing `foo.b`) as immutable
     //~^^ NOTE previous borrow of `foo` occurs here (through borrowing `foo.a`)

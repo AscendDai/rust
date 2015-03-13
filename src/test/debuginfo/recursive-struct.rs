@@ -9,7 +9,6 @@
 // except according to those terms.
 
 // ignore-tidy-linelength
-// ignore-android: FIXME(#10381)
 // ignore-lldb
 
 // compile-flags:-g
@@ -69,6 +68,7 @@
 // gdb-command:continue
 
 #![allow(unused_variables)]
+#![feature(box_syntax)]
 #![omit_gdb_pretty_printer_section]
 
 use self::Opt::{Empty, Val};
@@ -128,10 +128,10 @@ fn main() {
         next: Val {
             val: box UniqueNode {
                 next: Empty,
-                value: 1_u16,
+                value: 1,
             }
         },
-        value: 0_u16,
+        value: 0,
     };
 
     let unique_unique: Box<UniqueNode<u32>> = box UniqueNode {

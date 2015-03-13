@@ -8,7 +8,11 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-trait Foo {
+#![feature(box_syntax)]
+
+use std::marker::MarkerTrait;
+
+trait Foo : MarkerTrait {
 }
 
 impl<T:Copy> Foo for T {
@@ -17,7 +21,7 @@ impl<T:Copy> Foo for T {
 fn take_param<T:Foo>(foo: &T) { }
 
 fn main() {
-    let x = box 3i;
+    let x: Box<_> = box 3;
     take_param(&x);
     //~^ ERROR the trait `core::marker::Copy` is not implemented
 }

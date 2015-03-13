@@ -1,4 +1,4 @@
-// Copyright 2014 The Rust Project Developers. See the COPYRIGHT
+// Copyright 2014-2015 The Rust Project Developers. See the COPYRIGHT
 // file at the top-level directory of this distribution and at
 // http://rust-lang.org/COPYRIGHT.
 //
@@ -85,8 +85,8 @@
 
 use prelude::v1::*;
 
-use ffi;
-use io::IoResult;
+use ffi::CStr;
+use old_io::IoResult;
 use libc;
 use mem;
 use str;
@@ -126,8 +126,8 @@ pub fn write(w: &mut Writer) -> IoResult<()> {
     let cnt = unsafe { backtrace(buf.as_mut_ptr(), SIZE as libc::c_int) as uint};
 
     // skipping the first one as it is write itself
-    let iter = range(1, cnt).map(|i| {
-        print(w, i as int, buf[i])
+    let iter = (1..cnt).map(|i| {
+        print(w, i as int, buf[i], buf[i])
     });
     result::fold(iter, (), |_, _| ())
 }
@@ -136,7 +136,7 @@ pub fn write(w: &mut Writer) -> IoResult<()> {
 #[inline(never)] // if we know this is a function call, we can skip it when
                  // tracing
 pub fn write(w: &mut Writer) -> IoResult<()> {
-    use io::IoError;
+    use old_io::IoError;
 
     struct Context<'a> {
         idx: int,
@@ -150,7 +150,7 @@ pub fn write(w: &mut Writer) -> IoResult<()> {
     // I/O done here is blocking I/O, not green I/O, so we don't have to
     // worry about this being a native vs green mutex.
     static LOCK: StaticMutex = MUTEX_INIT;
-    let _g = unsafe { LOCK.lock() };
+    let _g = LOCK.lock();
 
     try!(writeln!(w, "stack backtrace:"));
 
@@ -171,7 +171,16 @@ pub fn write(w: &mut Writer) -> IoResult<()> {
     extern fn trace_fn(ctx: *mut uw::_Unwind_Context,
                        arg: *mut libc::c_void) -> uw::_Unwind_Reason_Code {
         let cx: &mut Context = unsafe { mem::transmute(arg) };
-        let ip = unsafe { uw::_Unwind_GetIP(ctx) as *mut libc::c_void };
+        let mut ip_before_insn = 0;
+        let mut ip = unsafe {
+            uw::_Unwind_GetIPInfo(ctx, &mut ip_before_insn) as *mut libc::c_void
+        };
+        if !ip.is_null() && ip_before_insn == 0 {
+            // this is a non-signaling frame, so `ip` refers to the address
+            // after the calling instruction. account for that.
+            ip = (ip as usize - 1) as *mut _;
+        }
+
         // dladdr() on osx gets whiny when we use FindEnclosingFunction, and
         // it appears to work fine without it, so we only use
         // FindEnclosingFunction on non-osx platforms. In doing so, we get a
@@ -182,7 +191,7 @@ pub fn write(w: &mut Writer) -> IoResult<()> {
         // instructions after it. This means that the return instruction
         // pointer points *outside* of the calling function, and by
         // unwinding it we go back to the original function.
-        let ip = if cfg!(target_os = "macos") || cfg!(target_os = "ios") {
+        let symaddr = if cfg!(target_os = "macos") || cfg!(target_os = "ios") {
             ip
         } else {
             unsafe { uw::_Unwind_FindEnclosingFunction(ip) }
@@ -203,7 +212,7 @@ pub fn write(w: &mut Writer) -> IoResult<()> {
         // Once we hit an error, stop trying to print more frames
         if cx.last_error.is_some() { return uw::_URC_FAILURE }
 
-        match print(cx.writer, cx.idx, ip) {
+        match print(cx.writer, cx.idx, ip, symaddr) {
             Ok(()) => {}
             Err(e) => { cx.last_error = Some(e); }
         }
@@ -214,7 +223,8 @@ pub fn write(w: &mut Writer) -> IoResult<()> {
 }
 
 #[cfg(any(target_os = "macos", target_os = "ios"))]
-fn print(w: &mut Writer, idx: int, addr: *mut libc::c_void) -> IoResult<()> {
+fn print(w: &mut Writer, idx: int, addr: *mut libc::c_void,
+         _symaddr: *mut libc::c_void) -> IoResult<()> {
     use intrinsics;
     #[repr(C)]
     struct Dl_info {
@@ -229,18 +239,21 @@ fn print(w: &mut Writer, idx: int, addr: *mut libc::c_void) -> IoResult<()> {
     }
 
     let mut info: Dl_info = unsafe { intrinsics::init() };
-    if unsafe { dladdr(addr as *const libc::c_void, &mut info) == 0 } {
+    if unsafe { dladdr(addr, &mut info) == 0 } {
         output(w, idx,addr, None)
     } else {
         output(w, idx, addr, Some(unsafe {
-            ffi::c_str_to_bytes(&info.dli_sname)
+            CStr::from_ptr(info.dli_sname).to_bytes()
         }))
     }
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "ios")))]
-fn print(w: &mut Writer, idx: int, addr: *mut libc::c_void) -> IoResult<()> {
-    use os;
+fn print(w: &mut Writer, idx: int, addr: *mut libc::c_void,
+         symaddr: *mut libc::c_void) -> IoResult<()> {
+    use env;
+    use ffi::AsOsStr;
+    use os::unix::prelude::*;
     use ptr;
 
     ////////////////////////////////////////////////////////////////////////
@@ -252,6 +265,12 @@ fn print(w: &mut Writer, idx: int, addr: *mut libc::c_void) -> IoResult<()> {
                       symname: *const libc::c_char,
                       symval: libc::uintptr_t,
                       symsize: libc::uintptr_t);
+    type backtrace_full_callback =
+        extern "C" fn(data: *mut libc::c_void,
+                      pc: libc::uintptr_t,
+                      filename: *const libc::c_char,
+                      lineno: libc::c_int,
+                      function: *const libc::c_char) -> libc::c_int;
     type backtrace_error_callback =
         extern "C" fn(data: *mut libc::c_void,
                       msg: *const libc::c_char,
@@ -272,11 +291,18 @@ fn print(w: &mut Writer, idx: int, addr: *mut libc::c_void) -> IoResult<()> {
                              cb: backtrace_syminfo_callback,
                              error: backtrace_error_callback,
                              data: *mut libc::c_void) -> libc::c_int;
+        fn backtrace_pcinfo(state: *mut backtrace_state,
+                            addr: libc::uintptr_t,
+                            cb: backtrace_full_callback,
+                            error: backtrace_error_callback,
+                            data: *mut libc::c_void) -> libc::c_int;
     }
 
     ////////////////////////////////////////////////////////////////////////
     // helper callbacks
     ////////////////////////////////////////////////////////////////////////
+
+    type FileLine = (*const libc::c_char, libc::c_int);
 
     extern fn error_cb(_data: *mut libc::c_void, _msg: *const libc::c_char,
                        _errnum: libc::c_int) {
@@ -289,6 +315,25 @@ fn print(w: &mut Writer, idx: int, addr: *mut libc::c_void) -> IoResult<()> {
                          _symsize: libc::uintptr_t) {
         let slot = data as *mut *const libc::c_char;
         unsafe { *slot = symname; }
+    }
+    extern fn pcinfo_cb(data: *mut libc::c_void,
+                        _pc: libc::uintptr_t,
+                        filename: *const libc::c_char,
+                        lineno: libc::c_int,
+                        _function: *const libc::c_char) -> libc::c_int {
+        if !filename.is_null() {
+            let slot = data as *mut &mut [FileLine];
+            let buffer = unsafe {ptr::read(slot)};
+
+            // if the buffer is not full, add file:line to the buffer
+            // and adjust the buffer for next possible calls to pcinfo_cb.
+            if !buffer.is_empty() {
+                buffer[0] = (filename, lineno);
+                unsafe { ptr::write(slot, &mut buffer[1..]); }
+            }
+        }
+
+        0
     }
 
     // The libbacktrace API supports creating a state, but it does not
@@ -318,14 +363,16 @@ fn print(w: &mut Writer, idx: int, addr: *mut libc::c_void) -> IoResult<()> {
         static mut LAST_FILENAME: [libc::c_char; 256] = [0; 256];
         if !STATE.is_null() { return STATE }
         let selfname = if cfg!(target_os = "freebsd") ||
-                          cfg!(target_os = "dragonfly") {
-            os::self_exe_name()
+                          cfg!(target_os = "dragonfly") ||
+                          cfg!(target_os = "bitrig") ||
+                          cfg!(target_os = "openbsd") {
+            env::current_exe().ok()
         } else {
             None
         };
         let filename = match selfname {
             Some(path) => {
-                let bytes = path.as_vec();
+                let bytes = path.as_os_str().as_bytes();
                 if bytes.len() < LAST_FILENAME.len() {
                     let i = bytes.iter();
                     for (slot, val) in LAST_FILENAME.iter_mut().zip(i) {
@@ -353,18 +400,45 @@ fn print(w: &mut Writer, idx: int, addr: *mut libc::c_void) -> IoResult<()> {
     if state.is_null() {
         return output(w, idx, addr, None)
     }
-    let mut data = 0 as *const libc::c_char;
+    let mut data = ptr::null();
     let data_addr = &mut data as *mut *const libc::c_char;
     let ret = unsafe {
-        backtrace_syminfo(state, addr as libc::uintptr_t,
+        backtrace_syminfo(state, symaddr as libc::uintptr_t,
                           syminfo_cb, error_cb,
                           data_addr as *mut libc::c_void)
     };
     if ret == 0 || data.is_null() {
-        output(w, idx, addr, None)
+        try!(output(w, idx, addr, None));
     } else {
-        output(w, idx, addr, Some(unsafe { ffi::c_str_to_bytes(&data) }))
+        try!(output(w, idx, addr, Some(unsafe { CStr::from_ptr(data).to_bytes() })));
     }
+
+    // pcinfo may return an arbitrary number of file:line pairs,
+    // in the order of stack trace (i.e. inlined calls first).
+    // in order to avoid allocation, we stack-allocate a fixed size of entries.
+    const FILELINE_SIZE: usize = 32;
+    let mut fileline_buf = [(ptr::null(), -1); FILELINE_SIZE];
+    let ret;
+    let fileline_count;
+    {
+        let mut fileline_win: &mut [FileLine] = &mut fileline_buf;
+        let fileline_addr = &mut fileline_win as *mut &mut [FileLine];
+        ret = unsafe {
+            backtrace_pcinfo(state, addr as libc::uintptr_t,
+                             pcinfo_cb, error_cb,
+                             fileline_addr as *mut libc::c_void)
+        };
+        fileline_count = FILELINE_SIZE - fileline_win.len();
+    }
+    if ret == 0 {
+        for (i, &(file, line)) in fileline_buf[..fileline_count].iter().enumerate() {
+            if file.is_null() { continue; } // just to be sure
+            let file = unsafe { CStr::from_ptr(file).to_bytes() };
+            try!(output_fileline(w, file, line, i == FILELINE_SIZE - 1));
+        }
+    }
+
+    Ok(())
 }
 
 // Finally, after all that work above, we can emit a symbol.
@@ -375,7 +449,19 @@ fn output(w: &mut Writer, idx: int, addr: *mut libc::c_void,
         Some(string) => try!(demangle(w, string)),
         None => try!(write!(w, "<unknown>")),
     }
-    w.write(&['\n' as u8])
+    w.write_all(&['\n' as u8])
+}
+
+#[allow(dead_code)]
+fn output_fileline(w: &mut Writer, file: &[u8], line: libc::c_int,
+                   more: bool) -> IoResult<()> {
+    let file = str::from_utf8(file).ok().unwrap_or("<unknown>");
+    // prior line: "  ##: {:2$} - func"
+    try!(write!(w, "      {:3$}at {}:{}", "", file, line, HEX_WIDTH));
+    if more {
+        try!(write!(w, " <... and possibly more>"));
+    }
+    w.write_all(&['\n' as u8])
 }
 
 /// Unwind library interface used for backtraces
@@ -418,9 +504,12 @@ mod uw {
                                  trace_argument: *mut libc::c_void)
                     -> _Unwind_Reason_Code;
 
-        #[cfg(all(not(target_os = "android"),
+        // available since GCC 4.2.0, should be fine for our purpose
+        #[cfg(all(not(all(target_os = "android", target_arch = "arm")),
                   not(all(target_os = "linux", target_arch = "arm"))))]
-        pub fn _Unwind_GetIP(ctx: *mut _Unwind_Context) -> libc::uintptr_t;
+        pub fn _Unwind_GetIPInfo(ctx: *mut _Unwind_Context,
+                                 ip_before_insn: *mut libc::c_int)
+                    -> libc::uintptr_t;
 
         #[cfg(all(not(target_os = "android"),
                   not(all(target_os = "linux", target_arch = "arm"))))]
@@ -431,7 +520,7 @@ mod uw {
     // On android, the function _Unwind_GetIP is a macro, and this is the
     // expansion of the macro. This is all copy/pasted directly from the
     // header file with the definition of _Unwind_GetIP.
-    #[cfg(any(target_os = "android",
+    #[cfg(any(all(target_os = "android", target_arch = "arm"),
               all(target_os = "linux", target_arch = "arm")))]
     pub unsafe fn _Unwind_GetIP(ctx: *mut _Unwind_Context) -> libc::uintptr_t {
         #[repr(C)]
@@ -474,6 +563,18 @@ mod uw {
                                 _Unwind_VRS_DataRepresentation::_UVRSD_UINT32,
                                 ptr as *mut libc::c_void);
         (val & !1) as libc::uintptr_t
+    }
+
+    // This function doesn't exist on Android or ARM/Linux, so make it same
+    // to _Unwind_GetIP
+    #[cfg(any(all(target_os = "android", target_arch = "arm"),
+              all(target_os = "linux", target_arch = "arm")))]
+    pub unsafe fn _Unwind_GetIPInfo(ctx: *mut _Unwind_Context,
+                                    ip_before_insn: *mut libc::c_int)
+        -> libc::uintptr_t
+    {
+        *ip_before_insn = 0;
+        _Unwind_GetIP(ctx)
     }
 
     // This function also doesn't exist on Android or ARM/Linux, so make it

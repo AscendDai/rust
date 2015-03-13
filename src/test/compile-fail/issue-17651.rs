@@ -12,7 +12,7 @@
 // and rejected.
 
 fn main() {
-    (|&:| box *[0us].as_slice())();
-    //~^ ERROR cannot move out of dereference
-    //~^^ ERROR cannot move a value of type [usize]
+    // FIXME (#22405): Replace `Box::new` with `box` here when/if possible.
+    (|| Box::new(*[0].as_slice()))();
+    //~^ ERROR the trait `core::marker::Sized` is not implemented for the type `[_]`
 }

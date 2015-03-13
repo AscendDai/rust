@@ -62,24 +62,36 @@ independently:
 This API is completely unstable and subject to change.
 
 */
-
+// Do not remove on snapshot creation. Needed for bootstrap. (Issue #22364)
+#![cfg_attr(stage0, feature(custom_attribute))]
 #![crate_name = "rustc_typeck"]
-#![experimental]
+#![unstable(feature = "rustc_private")]
+#![staged_api]
 #![crate_type = "dylib"]
 #![crate_type = "rlib"]
 #![doc(html_logo_url = "http://www.rust-lang.org/logos/rust-logo-128x128-blk-v2.png",
       html_favicon_url = "http://www.rust-lang.org/favicon.ico",
       html_root_url = "http://doc.rust-lang.org/nightly/")]
 
-#![feature(quote)]
-#![feature(slicing_syntax, unsafe_destructor)]
-#![feature(rustc_diagnostic_macros)]
 #![allow(non_camel_case_types)]
+
+#![feature(box_patterns)]
+#![feature(box_syntax)]
+#![feature(collections)]
+#![feature(core)]
+#![feature(int_uint)]
+#![feature(std_misc)]
+#![feature(quote)]
+#![feature(rustc_diagnostic_macros)]
+#![feature(rustc_private)]
+#![feature(unsafe_destructor)]
+#![feature(staged_api)]
 
 #[macro_use] extern crate log;
 #[macro_use] extern crate syntax;
 
 extern crate arena;
+extern crate fmt_macros;
 extern crate rustc;
 
 pub use rustc::lint;
@@ -91,7 +103,6 @@ pub use rustc::util;
 use middle::def;
 use middle::infer;
 use middle::subst;
-use middle::subst::VecPerParamSpace;
 use middle::ty::{self, Ty};
 use session::config;
 use util::common::time;
@@ -103,10 +114,17 @@ use syntax::print::pprust::*;
 use syntax::{ast, ast_map, abi};
 use syntax::ast_util::local_def;
 
+use std::cell::RefCell;
+
+// NB: This module needs to be declared first so diagnostics are
+// registered before they are used.
+pub mod diagnostics;
+
 mod check;
 mod rscope;
 mod astconv;
 mod collect;
+mod constrained_type_params;
 mod coherence;
 mod variance;
 
@@ -118,6 +136,11 @@ struct TypeAndSubsts<'tcx> {
 struct CrateCtxt<'a, 'tcx: 'a> {
     // A mapping from method call sites to traits that have that method.
     trait_map: ty::TraitMap,
+    /// A vector of every trait accessible in the whole crate
+    /// (i.e. including those from subcrates). This is used only for
+    /// error reporting, and so is lazily initialised and generally
+    /// shouldn't taint the common path (hence the RefCell).
+    all_traits: RefCell<Option<check::method::AllTraitsVec>>,
     tcx: &'a ty::ctxt<'tcx>,
 }
 
@@ -141,28 +164,13 @@ fn write_substs_to_tcx<'tcx>(tcx: &ty::ctxt<'tcx>,
         tcx.item_substs.borrow_mut().insert(node_id, item_substs);
     }
 }
-fn lookup_def_tcx(tcx:&ty::ctxt, sp: Span, id: ast::NodeId) -> def::Def {
+
+fn lookup_full_def(tcx: &ty::ctxt, sp: Span, id: ast::NodeId) -> def::Def {
     match tcx.def_map.borrow().get(&id) {
-        Some(x) => x.clone(),
-        _ => {
-            tcx.sess.span_fatal(sp, "internal error looking up a definition")
+        Some(x) => x.full_def(),
+        None => {
+            span_fatal!(tcx.sess, sp, E0242, "internal error looking up a definition")
         }
-    }
-}
-
-fn lookup_def_ccx(ccx: &CrateCtxt, sp: Span, id: ast::NodeId)
-                   -> def::Def {
-    lookup_def_tcx(ccx.tcx, sp, id)
-}
-
-fn no_params<'tcx>(t: Ty<'tcx>) -> ty::TypeScheme<'tcx> {
-    ty::TypeScheme {
-        generics: ty::Generics {
-            types: VecPerParamSpace::empty(),
-            regions: VecPerParamSpace::empty(),
-            predicates: VecPerParamSpace::empty(),
-        },
-        ty: t
     }
 }
 
@@ -189,11 +197,11 @@ fn require_same_types<'a, 'tcx, M>(tcx: &ty::ctxt<'tcx>,
     match result {
         Ok(_) => true,
         Err(ref terr) => {
-            tcx.sess.span_err(span,
-                              format!("{}: {}",
+            span_err!(tcx.sess, span, E0211,
+                              "{}: {}",
                                       msg(),
                                       ty::type_err_to_str(tcx,
-                                                          terr)).index(&FullRange));
+                                                          terr));
             ty::note_and_explain_type_err(tcx, terr);
             false
         }
@@ -239,10 +247,10 @@ fn check_main_fn_ty(ccx: &CrateCtxt,
         }
         _ => {
             tcx.sess.span_bug(main_span,
-                              format!("main has a non-function type: found \
+                              &format!("main has a non-function type: found \
                                        `{}`",
                                       ppaux::ty_to_string(tcx,
-                                                       main_t)).index(&FullRange));
+                                                       main_t)));
         }
     }
 }
@@ -291,9 +299,9 @@ fn check_start_fn_ty(ccx: &CrateCtxt,
         }
         _ => {
             tcx.sess.span_bug(start_span,
-                              format!("start has a non-function type: found \
+                              &format!("start has a non-function type: found \
                                        `{}`",
-                                      ppaux::ty_to_string(tcx, start_t)).index(&FullRange));
+                                      ppaux::ty_to_string(tcx, start_t)));
         }
     }
 }
@@ -315,6 +323,7 @@ pub fn check_crate(tcx: &ty::ctxt, trait_map: ty::TraitMap) {
     let time_passes = tcx.sess.time_passes();
     let ccx = CrateCtxt {
         trait_map: trait_map,
+        all_traits: RefCell::new(None),
         tcx: tcx
     };
 

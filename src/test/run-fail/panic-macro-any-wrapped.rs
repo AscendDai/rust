@@ -11,5 +11,5 @@
 // error-pattern:panicked at 'Box<Any>'
 
 fn main() {
-    panic!(box 612_i64);
+    panic!(Box::new(612_i64));
 }

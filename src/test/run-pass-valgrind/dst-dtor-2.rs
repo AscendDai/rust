@@ -23,7 +23,8 @@ struct Fat<T: ?Sized> {
 
 pub fn main() {
     {
-        let _x: Box<Fat<[Foo]>> = box Fat { f: [Foo, Foo, Foo] };
+        // FIXME (#22405): Replace `Box::new` with `box` here when/if possible.
+        let _x: Box<Fat<[Foo]>> = Box::<Fat<[Foo; 3]>>::new(Fat { f: [Foo, Foo, Foo] });
     }
     unsafe {
         assert!(DROP_RAN == 3);

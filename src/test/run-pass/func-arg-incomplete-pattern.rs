@@ -11,6 +11,8 @@
 // Test that we do not leak when the arg pattern must drop part of the
 // argument (in this case, the `y` field).
 
+#![allow(unknown_features)]
+#![feature(box_syntax)]
 
 struct Foo {
     x: Box<uint>,
@@ -23,7 +25,7 @@ fn foo(Foo {x, ..}: Foo) -> *const uint {
 }
 
 pub fn main() {
-    let obj = box 1;
+    let obj: Box<_> = box 1;
     let objptr: *const uint = &*obj;
     let f = Foo {x: obj, y: box 2};
     let xptr = foo(f);

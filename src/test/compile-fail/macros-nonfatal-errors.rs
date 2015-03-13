@@ -15,15 +15,11 @@
 #![feature(trace_macros, concat_idents)]
 
 #[derive(Default, //~ ERROR
-           Rand, //~ ERROR
            Zero)] //~ ERROR
 enum CantDeriveThose {}
 
 fn main() {
     doesnt_exist!(); //~ ERROR
-
-    bytes!(invalid); //~ ERROR non-literal in bytes!
-    //~^ WARN `bytes!` is deprecated
 
     asm!(invalid); //~ ERROR
 

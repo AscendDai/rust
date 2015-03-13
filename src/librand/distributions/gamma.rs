@@ -37,7 +37,7 @@ use super::{IndependentSample, Sample, Exp};
 /// == 1`, and using the boosting technique described in [1] for
 /// `shape < 1`.
 ///
-/// # Example
+/// # Examples
 ///
 /// ```rust
 /// use std::rand;
@@ -184,7 +184,7 @@ impl IndependentSample<f64> for GammaLargeShape {
 /// `k`, this uses the equivalent characterisation `χ²(k) = Gamma(k/2,
 /// 2)`.
 ///
-/// # Example
+/// # Examples
 ///
 /// ```rust
 /// use std::rand;
@@ -241,7 +241,7 @@ impl IndependentSample<f64> for ChiSquared {
 /// chi-squared distributions, that is, `F(m,n) = (χ²(m)/m) /
 /// (χ²(n)/n)`.
 ///
-/// # Example
+/// # Examples
 ///
 /// ```rust
 /// use std::rand;
@@ -285,7 +285,7 @@ impl IndependentSample<f64> for FisherF {
 /// The Student t distribution, `t(nu)`, where `nu` is the degrees of
 /// freedom.
 ///
-/// # Example
+/// # Examples
 ///
 /// ```rust
 /// use std::rand;
@@ -332,7 +332,7 @@ mod test {
     fn test_chi_squared_one() {
         let mut chi = ChiSquared::new(1.0);
         let mut rng = ::test::rng();
-        for _ in range(0u, 1000) {
+        for _ in 0..1000 {
             chi.sample(&mut rng);
             chi.ind_sample(&mut rng);
         }
@@ -341,7 +341,7 @@ mod test {
     fn test_chi_squared_small() {
         let mut chi = ChiSquared::new(0.5);
         let mut rng = ::test::rng();
-        for _ in range(0u, 1000) {
+        for _ in 0..1000 {
             chi.sample(&mut rng);
             chi.ind_sample(&mut rng);
         }
@@ -350,13 +350,13 @@ mod test {
     fn test_chi_squared_large() {
         let mut chi = ChiSquared::new(30.0);
         let mut rng = ::test::rng();
-        for _ in range(0u, 1000) {
+        for _ in 0..1000 {
             chi.sample(&mut rng);
             chi.ind_sample(&mut rng);
         }
     }
     #[test]
-    #[should_fail]
+    #[should_panic]
     fn test_chi_squared_invalid_dof() {
         ChiSquared::new(-1.0);
     }
@@ -365,7 +365,7 @@ mod test {
     fn test_f() {
         let mut f = FisherF::new(2.0, 32.0);
         let mut rng = ::test::rng();
-        for _ in range(0u, 1000) {
+        for _ in 0..1000 {
             f.sample(&mut rng);
             f.ind_sample(&mut rng);
         }
@@ -375,7 +375,7 @@ mod test {
     fn test_t() {
         let mut t = StudentT::new(11.0);
         let mut rng = ::test::rng();
-        for _ in range(0u, 1000) {
+        for _ in 0..1000 {
             t.sample(&mut rng);
             t.ind_sample(&mut rng);
         }
@@ -398,7 +398,7 @@ mod bench {
         let mut rng = ::test::weak_rng();
 
         b.iter(|| {
-            for _ in range(0, ::RAND_BENCH_N) {
+            for _ in 0..::RAND_BENCH_N {
                 gamma.ind_sample(&mut rng);
             }
         });
@@ -411,7 +411,7 @@ mod bench {
         let mut rng = ::test::weak_rng();
 
         b.iter(|| {
-            for _ in range(0, ::RAND_BENCH_N) {
+            for _ in 0..::RAND_BENCH_N {
                 gamma.ind_sample(&mut rng);
             }
         });

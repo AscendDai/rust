@@ -9,7 +9,6 @@
 // except according to those terms.
 
 // ignore-test
-// ignore-lexer-test FIXME #15881
 
 // notes on this test case:
 // On Thu, Apr 18, 2013-2014 at 6:30 PM, John Clements <clements@brinckerhoff.org> wrote:
@@ -73,17 +72,17 @@ fn range(lo: uint, hi: uint, it: |uint|) {
     let mut i = lo;
     while i < hi {
         it(i);
-        i += 1u;
+        i += 1;
     }
 }
 
 pub fn main() {
-    let range: 'static ||uint|| = |a| range(0u, 1000u, a);
+    let range: 'static ||uint|| = |a| range(0, 1000, a);
     let filt: 'static ||v: uint|| = |a| filter(
         range,
-        |&&n: uint| n % 3u != 0u && n % 5u != 0u,
+        |&&n: uint| n % 3 != 0 && n % 5 != 0,
         a);
-    let sum = foldl(filt, 0u, |accum, &&n: uint| accum + n );
+    let sum = foldl(filt, 0, |accum, &&n: uint| accum + n );
 
     println!("{}", sum);
 }

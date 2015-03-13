@@ -11,6 +11,9 @@
 // Testing creating two vtables with the same self type, but different
 // traits.
 
+#![allow(unknown_features)]
+#![feature(box_syntax)]
+
 use std::any::Any;
 
 trait Wrap {
@@ -32,7 +35,7 @@ fn is<T:'static>(x: &Any) -> bool {
 }
 
 fn main() {
-    let x = box 22i as Box<Wrap>;
+    let x = box 22 as Box<Wrap>;
     println!("x={}", x.get());
     let y = x.wrap();
 }

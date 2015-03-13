@@ -24,11 +24,11 @@
 //! # Usage
 //!
 //! This module should likely not be used directly unless other primitives are
-//! being built on. types such as `thread_local::scoped::Key` are likely much
+//! being built on. types such as `thread_local::spawn::Key` are likely much
 //! more useful in practice than this OS-based version which likely requires
 //! unsafe code to interoperate with.
 //!
-//! # Example
+//! # Examples
 //!
 //! Using a dynamically allocated TLS key. Note that this key can be shared
 //! among many threads via an `Arc`.
@@ -55,10 +55,12 @@
 //! ```
 
 #![allow(non_camel_case_types)]
+#![unstable(feature = "thread_local_internals")]
+#![allow(dead_code)] // sys isn't exported yet
 
 use prelude::v1::*;
 
-use sync::atomic::{self, AtomicUint, Ordering};
+use sync::atomic::{self, AtomicUsize, Ordering};
 use sync::{Mutex, Once, ONCE_INIT};
 
 use sys::thread_local as imp;
@@ -72,7 +74,7 @@ use sys::thread_local as imp;
 /// time. The key is also deallocated when the Rust runtime exits or `destroy`
 /// is called, whichever comes first.
 ///
-/// # Example
+/// # Examples
 ///
 /// ```ignore
 /// use tls::os::{StaticKey, INIT};
@@ -97,7 +99,7 @@ pub struct StaticKey {
 
 /// Inner contents of `StaticKey`, created by the `INIT_INNER` constant.
 pub struct StaticKeyInner {
-    key: AtomicUint,
+    key: AtomicUsize,
 }
 
 /// A type for a safely managed OS-based TLS slot.
@@ -109,7 +111,7 @@ pub struct StaticKeyInner {
 /// Implementations will likely, however, contain unsafe code as this type only
 /// operates on `*mut u8`, an unsafe pointer.
 ///
-/// # Example
+/// # Examples
 ///
 /// ```rust,ignore
 /// use tls::os::Key;
@@ -137,7 +139,7 @@ pub const INIT: StaticKey = StaticKey {
 ///
 /// This value allows specific configuration of the destructor for a TLS key.
 pub const INIT_INNER: StaticKeyInner = StaticKeyInner {
-    key: atomic::ATOMIC_UINT_INIT,
+    key: atomic::ATOMIC_USIZE_INIT,
 };
 
 static INIT_KEYS: Once = ONCE_INIT;

@@ -8,6 +8,9 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![allow(unknown_features)]
+#![feature(box_syntax)]
+
 struct StrWrap {
     s: String
 }
@@ -18,7 +21,7 @@ impl StrWrap {
     }
 
     fn get_s<'a>(&'a self) -> &'a str {
-        self.s.as_slice()
+        &self.s
     }
 }
 

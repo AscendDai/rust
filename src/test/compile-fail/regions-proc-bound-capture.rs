@@ -8,15 +8,17 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-fn borrowed_proc<'a>(x: &'a int) -> Box<FnMut()->(int) + 'a> {
+// FIXME (#22405): Replace `Box::new` with `box` here when/if possible.
+
+fn borrowed_proc<'a>(x: &'a isize) -> Box<FnMut()->(isize) + 'a> {
     // This is legal, because the region bound on `proc`
     // states that it captures `x`.
-    box move|| { *x }
+    Box::new(move|| { *x })
 }
 
-fn static_proc(x: &int) -> Box<FnMut()->(int) + 'static> {
+fn static_proc(x: &isize) -> Box<FnMut()->(isize) + 'static> {
     // This is illegal, because the region bound on `proc` is 'static.
-    box move|| { *x } //~ ERROR cannot infer
+    Box::new(move|| { *x }) //~ ERROR captured variable `x` does not outlive the enclosing closure
 }
 
 fn main() { }

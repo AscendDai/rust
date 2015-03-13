@@ -8,6 +8,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![allow(unknown_features)]
+#![feature(box_syntax)]
 
 fn p_foo<T>(_pinned: T) { }
 fn s_foo<T>(_shared: T) { }
@@ -30,13 +32,13 @@ fn r(i:int) -> r {
 pub fn main() {
     p_foo(r(10));
 
-    p_foo(box r(10));
-    p_foo(box 10i);
-    p_foo(10i);
+    p_foo::<Box<_>>(box r(10));
+    p_foo::<Box<_>>(box 10);
+    p_foo(10);
 
-    s_foo(box 10i);
-    s_foo(10i);
+    s_foo::<Box<_>>(box 10);
+    s_foo(10);
 
-    u_foo(box 10i);
-    u_foo(10i);
+    u_foo::<Box<_>>(box 10);
+    u_foo(10);
 }

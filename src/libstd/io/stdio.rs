@@ -1,4 +1,4 @@
-// Copyright 2013 The Rust Project Developers. See the COPYRIGHT
+// Copyright 2015 The Rust Project Developers. See the COPYRIGHT
 // file at the top-level directory of this distribution and at
 // http://rust-lang.org/COPYRIGHT.
 //
@@ -8,558 +8,315 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-//! Non-blocking access to stdin, stdout, and stderr.
-//!
-//! This module provides bindings to the local event loop's TTY interface, using it
-//! to offer synchronous but non-blocking versions of stdio. These handles can be
-//! inspected for information about terminal dimensions or for related information
-//! about the stream or terminal to which it is attached.
-//!
-//! # Example
-//!
-//! ```rust
-//! # #![allow(unused_must_use)]
-//! use std::io;
-//!
-//! let mut out = io::stdout();
-//! out.write(b"Hello, world!");
-//! ```
+use prelude::v1::*;
+use io::prelude::*;
 
-use self::StdSource::*;
-
-use boxed::Box;
-use cell::RefCell;
-use clone::Clone;
-use failure::LOCAL_STDERR;
+use cmp;
 use fmt;
-use io::{Reader, Writer, IoResult, IoError, OtherIoError, Buffer,
-         standard_error, EndOfFile, LineBufferedWriter, BufferedReader};
-use marker::{Sync, Send};
-use libc;
-use mem;
-use option::Option;
-use option::Option::{Some, None};
-use ops::{Deref, DerefMut, FnOnce};
-use result::Result::{Ok, Err};
-use rt;
-use slice::SliceExt;
-use str::StrExt;
-use string::String;
-use sys::{fs, tty};
-use sync::{Arc, Mutex, MutexGuard, Once, ONCE_INIT};
-use uint;
-use vec::Vec;
+use io::lazy::Lazy;
+use io::{self, BufReader, LineWriter};
+use sync::{Arc, Mutex, MutexGuard};
+use sys::stdio;
 
-// And so begins the tale of acquiring a uv handle to a stdio stream on all
-// platforms in all situations. Our story begins by splitting the world into two
-// categories, windows and unix. Then one day the creators of unix said let
-// there be redirection! And henceforth there was redirection away from the
-// console for standard I/O streams.
+/// A handle to a raw instance of the standard input stream of this process.
+///
+/// This handle is not synchronized or buffered in any fashion. Constructed via
+/// the `std::io::stdin_raw` function.
+pub struct StdinRaw(stdio::Stdin);
+
+/// A handle to a raw instance of the standard output stream of this process.
+///
+/// This handle is not synchronized or buffered in any fashion. Constructed via
+/// the `std::io::stdout_raw` function.
+pub struct StdoutRaw(stdio::Stdout);
+
+/// A handle to a raw instance of the standard output stream of this process.
+///
+/// This handle is not synchronized or buffered in any fashion. Constructed via
+/// the `std::io::stderr_raw` function.
+pub struct StderrRaw(stdio::Stderr);
+
+/// Construct a new raw handle to the standard input of this process.
+///
+/// The returned handle does not interact with any other handles created nor
+/// handles returned by `std::io::stdin`. Data buffered by the `std::io::stdin`
+/// handles is **not** available to raw handles returned from this function.
+///
+/// The returned handle has no external synchronization or buffering.
+pub fn stdin_raw() -> StdinRaw { StdinRaw(stdio::Stdin::new()) }
+
+/// Construct a new raw handle to the standard input stream of this process.
+///
+/// The returned handle does not interact with any other handles created nor
+/// handles returned by `std::io::stdout`. Note that data is buffered by the
+/// `std::io::stdin` handles so writes which happen via this raw handle may
+/// appear before previous writes.
+///
+/// The returned handle has no external synchronization or buffering layered on
+/// top.
+pub fn stdout_raw() -> StdoutRaw { StdoutRaw(stdio::Stdout::new()) }
+
+/// Construct a new raw handle to the standard input stream of this process.
+///
+/// The returned handle does not interact with any other handles created nor
+/// handles returned by `std::io::stdout`.
+///
+/// The returned handle has no external synchronization or buffering layered on
+/// top.
+pub fn stderr_raw() -> StderrRaw { StderrRaw(stdio::Stderr::new()) }
+
+impl Read for StdinRaw {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> { self.0.read(buf) }
+}
+impl Write for StdoutRaw {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> { self.0.write(buf) }
+    fn flush(&mut self) -> io::Result<()> { Ok(()) }
+}
+impl Write for StderrRaw {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> { self.0.write(buf) }
+    fn flush(&mut self) -> io::Result<()> { Ok(()) }
+}
+
+/// A handle to the standard input stream of a process.
+///
+/// Each handle is a shared reference to a global buffer of input data to this
+/// process. A handle can be `lock`'d to gain full access to `BufRead` methods
+/// (e.g. `.lines()`). Writes to this handle are otherwise locked with respect
+/// to other writes.
+///
+/// This handle implements the `Read` trait, but beware that concurrent reads
+/// of `Stdin` must be executed with care.
+pub struct Stdin {
+    inner: Arc<Mutex<BufReader<StdinRaw>>>,
+}
+
+/// A locked reference to the a `Stdin` handle.
+///
+/// This handle implements both the `Read` and `BufRead` traits and is
+/// constructed via the `lock` method on `Stdin`.
+pub struct StdinLock<'a> {
+    inner: MutexGuard<'a, BufReader<StdinRaw>>,
+}
+
+/// Create a new handle to the global standard input stream of this process.
+///
+/// The handle returned refers to a globally shared buffer between all threads.
+/// Access is synchronized and can be explicitly controlled with the `lock()`
+/// method.
+///
+/// The `Read` trait is implemented for the returned value but the `BufRead`
+/// trait is not due to the global nature of the standard input stream. The
+/// locked version, `StdinLock`, implements both `Read` and `BufRead`, however.
+///
+/// To avoid locking and buffering altogether, it is recommended to use the
+/// `stdin_raw` constructor.
+pub fn stdin() -> Stdin {
+    static INSTANCE: Lazy<Mutex<BufReader<StdinRaw>>> = lazy_init!(stdin_init);
+    return Stdin {
+        inner: INSTANCE.get().expect("cannot access stdin during shutdown"),
+    };
+
+    fn stdin_init() -> Arc<Mutex<BufReader<StdinRaw>>> {
+        // The default buffer capacity is 64k, but apparently windows
+        // doesn't like 64k reads on stdin. See #13304 for details, but the
+        // idea is that on windows we use a slightly smaller buffer that's
+        // been seen to be acceptable.
+        Arc::new(Mutex::new(if cfg!(windows) {
+            BufReader::with_capacity(8 * 1024, stdin_raw())
+        } else {
+            BufReader::new(stdin_raw())
+        }))
+    }
+}
+
+impl Stdin {
+    /// Lock this handle to the standard input stream, returning a readable
+    /// guard.
+    ///
+    /// The lock is released when the returned lock goes out of scope. The
+    /// returned guard also implements the `Read` and `BufRead` traits for
+    /// accessing the underlying data.
+    pub fn lock(&self) -> StdinLock {
+        StdinLock { inner: self.inner.lock().unwrap() }
+    }
+}
+
+impl Read for Stdin {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        self.lock().read(buf)
+    }
+
+    fn read_to_end(&mut self, buf: &mut Vec<u8>) -> io::Result<()> {
+        self.lock().read_to_end(buf)
+    }
+
+    fn read_to_string(&mut self, buf: &mut String) -> io::Result<()> {
+        self.lock().read_to_string(buf)
+    }
+}
+
+impl<'a> Read for StdinLock<'a> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        self.inner.read(buf)
+    }
+}
+impl<'a> BufRead for StdinLock<'a> {
+    fn fill_buf(&mut self) -> io::Result<&[u8]> { self.inner.fill_buf() }
+    fn consume(&mut self, n: usize) { self.inner.consume(n) }
+}
+
+// As with stdin on windows, stdout often can't handle writes of large
+// sizes. For an example, see #14940. For this reason, don't try to
+// write the entire output buffer on windows. On unix we can just
+// write the whole buffer all at once.
 //
-// After this day, the world split into four factions:
+// For some other references, it appears that this problem has been
+// encountered by others [1] [2]. We choose the number 8KB just because
+// libuv does the same.
 //
-// 1. Unix with stdout on a terminal.
-// 2. Unix with stdout redirected.
-// 3. Windows with stdout on a terminal.
-// 4. Windows with stdout redirected.
-//
-// Many years passed, and then one day the nation of libuv decided to unify this
-// world. After months of toiling, uv created three ideas: TTY, Pipe, File.
-// These three ideas propagated throughout the lands and the four great factions
-// decided to settle among them.
-//
-// The groups of 1, 2, and 3 all worked very hard towards the idea of TTY. Upon
-// doing so, they even enhanced themselves further then their Pipe/File
-// brethren, becoming the dominant powers.
-//
-// The group of 4, however, decided to work independently. They abandoned the
-// common TTY belief throughout, and even abandoned the fledgling Pipe belief.
-// The members of the 4th faction decided to only align themselves with File.
-//
-// tl;dr; TTY works on everything but when windows stdout is redirected, in that
-//        case pipe also doesn't work, but magically file does!
-enum StdSource {
-    TTY(tty::TTY),
-    File(fs::FileDesc),
+// [1]: https://tahoe-lafs.org/trac/tahoe-lafs/ticket/1232
+// [2]: http://www.mail-archive.com/log4net-dev@logging.apache.org/msg00661.html
+#[cfg(windows)]
+const OUT_MAX: usize = 8192;
+#[cfg(unix)]
+const OUT_MAX: usize = ::usize::MAX;
+
+/// A handle to the global standard output stream of the current process.
+///
+/// Each handle shares a global buffer of data to be written to the standard
+/// output stream. Access is also synchronized via a lock and explicit control
+/// over locking is available via the `lock` method.
+pub struct Stdout {
+    // FIXME: this should be LineWriter or BufWriter depending on the state of
+    //        stdout (tty or not). Note that if this is not line buffered it
+    //        should also flush-on-panic or some form of flush-on-abort.
+    inner: Arc<Mutex<LineWriter<StdoutRaw>>>,
 }
 
-fn src<T, F>(fd: libc::c_int, _readable: bool, f: F) -> T where
-    F: FnOnce(StdSource) -> T,
-{
-    match tty::TTY::new(fd) {
-        Ok(tty) => f(TTY(tty)),
-        Err(_) => f(File(fs::FileDesc::new(fd, false))),
+/// A locked reference to the a `Stdout` handle.
+///
+/// This handle implements the `Write` trait and is constructed via the `lock`
+/// method on `Stdout`.
+pub struct StdoutLock<'a> {
+    inner: MutexGuard<'a, LineWriter<StdoutRaw>>,
+}
+
+/// Constructs a new reference to the standard output of the current process.
+///
+/// Each handle returned is a reference to a shared global buffer whose access
+/// is synchronized via a mutex. Explicit control over synchronization is
+/// provided via the `lock` method.
+///
+/// The returned handle implements the `Write` trait.
+///
+/// To avoid locking and buffering altogether, it is recommended to use the
+/// `stdout_raw` constructor.
+pub fn stdout() -> Stdout {
+    static INSTANCE: Lazy<Mutex<LineWriter<StdoutRaw>>> = lazy_init!(stdout_init);
+    return Stdout {
+        inner: INSTANCE.get().expect("cannot access stdout during shutdown"),
+    };
+
+    fn stdout_init() -> Arc<Mutex<LineWriter<StdoutRaw>>> {
+        Arc::new(Mutex::new(LineWriter::new(stdout_raw())))
     }
 }
 
-thread_local! {
-    static LOCAL_STDOUT: RefCell<Option<Box<Writer + Send>>> = {
-        RefCell::new(None)
-    }
-}
-
-struct RaceBox(BufferedReader<StdReader>);
-
-unsafe impl Send for RaceBox {}
-unsafe impl Sync for RaceBox {}
-
-/// A synchronized wrapper around a buffered reader from stdin
-#[derive(Clone)]
-pub struct StdinReader {
-    inner: Arc<Mutex<RaceBox>>,
-}
-
-unsafe impl Send for StdinReader {}
-unsafe impl Sync for StdinReader {}
-
-/// A guard for exclusive access to `StdinReader`'s internal `BufferedReader`.
-pub struct StdinReaderGuard<'a> {
-    inner: MutexGuard<'a, RaceBox>,
-}
-
-impl<'a> Deref for StdinReaderGuard<'a> {
-    type Target = BufferedReader<StdReader>;
-
-    fn deref(&self) -> &BufferedReader<StdReader> {
-        &self.inner.0
-    }
-}
-
-impl<'a> DerefMut for StdinReaderGuard<'a> {
-    fn deref_mut(&mut self) -> &mut BufferedReader<StdReader> {
-        &mut self.inner.0
-    }
-}
-
-impl StdinReader {
-    /// Locks the `StdinReader`, granting the calling thread exclusive access
-    /// to the underlying `BufferedReader`.
+impl Stdout {
+    /// Lock this handle to the standard output stream, returning a writable
+    /// guard.
     ///
-    /// This provides access to methods like `chars` and `lines`.
+    /// The lock is released when the returned lock goes out of scope. The
+    /// returned guard also implements the `Write` trait for writing data.
+    pub fn lock(&self) -> StdoutLock {
+        StdoutLock { inner: self.inner.lock().unwrap() }
+    }
+}
+
+impl Write for Stdout {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.lock().write(buf)
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        self.lock().flush()
+    }
+    fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
+        self.lock().write_all(buf)
+    }
+    fn write_fmt(&mut self, fmt: fmt::Arguments) -> io::Result<()> {
+        self.lock().write_fmt(fmt)
+    }
+}
+impl<'a> Write for StdoutLock<'a> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.inner.write(&buf[..cmp::min(buf.len(), OUT_MAX)])
+    }
+    fn flush(&mut self) -> io::Result<()> { self.inner.flush() }
+}
+
+/// A handle to the standard error stream of a process.
+///
+/// For more information, see `stderr`
+pub struct Stderr {
+    inner: Arc<Mutex<StderrRaw>>,
+}
+
+/// A locked reference to the a `Stderr` handle.
+///
+/// This handle implements the `Write` trait and is constructed via the `lock`
+/// method on `Stderr`.
+pub struct StderrLock<'a> {
+    inner: MutexGuard<'a, StderrRaw>,
+}
+
+/// Constructs a new reference to the standard error stream of a process.
+///
+/// Each returned handle is synchronized amongst all other handles created from
+/// this function. No handles are buffered, however.
+///
+/// The returned handle implements the `Write` trait.
+///
+/// To avoid locking altogether, it is recommended to use the `stderr_raw`
+/// constructor.
+pub fn stderr() -> Stderr {
+    static INSTANCE: Lazy<Mutex<StderrRaw>> = lazy_init!(stderr_init);
+    return Stderr {
+        inner: INSTANCE.get().expect("cannot access stderr during shutdown"),
+    };
+
+    fn stderr_init() -> Arc<Mutex<StderrRaw>> {
+        Arc::new(Mutex::new(stderr_raw()))
+    }
+}
+
+impl Stderr {
+    /// Lock this handle to the standard error stream, returning a writable
+    /// guard.
     ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use std::io;
-    ///
-    /// for line in io::stdin().lock().lines() {
-    ///     println!("{}", line.unwrap());
-    /// }
-    /// ```
-    pub fn lock<'a>(&'a mut self) -> StdinReaderGuard<'a> {
-        StdinReaderGuard {
-            inner: self.inner.lock().unwrap()
-        }
-    }
-
-    /// Like `Buffer::read_line`.
-    ///
-    /// The read is performed atomically - concurrent read calls in other
-    /// threads will not interleave with this one.
-    pub fn read_line(&mut self) -> IoResult<String> {
-        self.inner.lock().unwrap().0.read_line()
-    }
-
-    /// Like `Buffer::read_until`.
-    ///
-    /// The read is performed atomically - concurrent read calls in other
-    /// threads will not interleave with this one.
-    pub fn read_until(&mut self, byte: u8) -> IoResult<Vec<u8>> {
-        self.inner.lock().unwrap().0.read_until(byte)
-    }
-
-    /// Like `Buffer::read_char`.
-    ///
-    /// The read is performed atomically - concurrent read calls in other
-    /// threads will not interleave with this one.
-    pub fn read_char(&mut self) -> IoResult<char> {
-        self.inner.lock().unwrap().0.read_char()
+    /// The lock is released when the returned lock goes out of scope. The
+    /// returned guard also implements the `Write` trait for writing data.
+    pub fn lock(&self) -> StderrLock {
+        StderrLock { inner: self.inner.lock().unwrap() }
     }
 }
 
-impl Reader for StdinReader {
-    fn read(&mut self, buf: &mut [u8]) -> IoResult<uint> {
-        self.inner.lock().unwrap().0.read(buf)
+impl Write for Stderr {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.lock().write(buf)
     }
-
-    // We have to manually delegate all of these because the default impls call
-    // read more than once and we don't want those calls to interleave (or
-    // incur the costs of repeated locking).
-
-    fn read_at_least(&mut self, min: uint, buf: &mut [u8]) -> IoResult<uint> {
-        self.inner.lock().unwrap().0.read_at_least(min, buf)
+    fn flush(&mut self) -> io::Result<()> {
+        self.lock().flush()
     }
-
-    fn push_at_least(&mut self, min: uint, len: uint, buf: &mut Vec<u8>) -> IoResult<uint> {
-        self.inner.lock().unwrap().0.push_at_least(min, len, buf)
+    fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
+        self.lock().write_all(buf)
     }
-
-    fn read_to_end(&mut self) -> IoResult<Vec<u8>> {
-        self.inner.lock().unwrap().0.read_to_end()
-    }
-
-    fn read_le_uint_n(&mut self, nbytes: uint) -> IoResult<u64> {
-        self.inner.lock().unwrap().0.read_le_uint_n(nbytes)
-    }
-
-    fn read_be_uint_n(&mut self, nbytes: uint) -> IoResult<u64> {
-        self.inner.lock().unwrap().0.read_be_uint_n(nbytes)
+    fn write_fmt(&mut self, fmt: fmt::Arguments) -> io::Result<()> {
+        self.lock().write_fmt(fmt)
     }
 }
-
-/// Creates a new handle to the stdin of the current process.
-///
-/// The returned handle is a wrapper around a global `BufferedReader` shared
-/// by all threads. If buffered access is not desired, the `stdin_raw` function
-/// is provided to provided unbuffered access to stdin.
-///
-/// See `stdout()` for more notes about this function.
-pub fn stdin() -> StdinReader {
-    // We're following the same strategy as kimundi's lazy_static library
-    static mut STDIN: *const StdinReader = 0 as *const StdinReader;
-    static ONCE: Once = ONCE_INIT;
-
-    unsafe {
-        ONCE.call_once(|| {
-            // The default buffer capacity is 64k, but apparently windows doesn't like
-            // 64k reads on stdin. See #13304 for details, but the idea is that on
-            // windows we use a slightly smaller buffer that's been seen to be
-            // acceptable.
-            let stdin = if cfg!(windows) {
-                BufferedReader::with_capacity(8 * 1024, stdin_raw())
-            } else {
-                BufferedReader::new(stdin_raw())
-            };
-            let stdin = StdinReader {
-                inner: Arc::new(Mutex::new(RaceBox(stdin)))
-            };
-            STDIN = mem::transmute(box stdin);
-
-            // Make sure to free it at exit
-            rt::at_exit(|| {
-                mem::transmute::<_, Box<StdinReader>>(STDIN);
-                STDIN = 0 as *const _;
-            });
-        });
-
-        (*STDIN).clone()
+impl<'a> Write for StderrLock<'a> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.inner.write(&buf[..cmp::min(buf.len(), OUT_MAX)])
     }
-}
-
-/// Creates a new non-blocking handle to the stdin of the current process.
-///
-/// Unlike `stdin()`, the returned reader is *not* a buffered reader.
-///
-/// See `stdout()` for more notes about this function.
-pub fn stdin_raw() -> StdReader {
-    src(libc::STDIN_FILENO, true, |src| StdReader { inner: src })
-}
-
-/// Creates a line-buffered handle to the stdout of the current process.
-///
-/// Note that this is a fairly expensive operation in that at least one memory
-/// allocation is performed. Additionally, this must be called from a runtime
-/// task context because the stream returned will be a non-blocking object using
-/// the local scheduler to perform the I/O.
-///
-/// Care should be taken when creating multiple handles to an output stream for
-/// a single process. While usage is still safe, the output may be surprising if
-/// no synchronization is performed to ensure a sane output.
-pub fn stdout() -> LineBufferedWriter<StdWriter> {
-    LineBufferedWriter::new(stdout_raw())
-}
-
-/// Creates an unbuffered handle to the stdout of the current process
-///
-/// See notes in `stdout()` for more information.
-pub fn stdout_raw() -> StdWriter {
-    src(libc::STDOUT_FILENO, false, |src| StdWriter { inner: src })
-}
-
-/// Creates a line-buffered handle to the stderr of the current process.
-///
-/// See `stdout()` for notes about this function.
-pub fn stderr() -> LineBufferedWriter<StdWriter> {
-    LineBufferedWriter::new(stderr_raw())
-}
-
-/// Creates an unbuffered handle to the stderr of the current process
-///
-/// See notes in `stdout()` for more information.
-pub fn stderr_raw() -> StdWriter {
-    src(libc::STDERR_FILENO, false, |src| StdWriter { inner: src })
-}
-
-/// Resets the task-local stdout handle to the specified writer
-///
-/// This will replace the current task's stdout handle, returning the old
-/// handle. All future calls to `print` and friends will emit their output to
-/// this specified handle.
-///
-/// Note that this does not need to be called for all new tasks; the default
-/// output handle is to the process's stdout stream.
-pub fn set_stdout(stdout: Box<Writer + Send>) -> Option<Box<Writer + Send>> {
-    let mut new = Some(stdout);
-    LOCAL_STDOUT.with(|slot| {
-        mem::replace(&mut *slot.borrow_mut(), new.take())
-    }).and_then(|mut s| {
-        let _ = s.flush();
-        Some(s)
-    })
-}
-
-/// Resets the task-local stderr handle to the specified writer
-///
-/// This will replace the current task's stderr handle, returning the old
-/// handle. Currently, the stderr handle is used for printing panic messages
-/// during task panic.
-///
-/// Note that this does not need to be called for all new tasks; the default
-/// output handle is to the process's stderr stream.
-pub fn set_stderr(stderr: Box<Writer + Send>) -> Option<Box<Writer + Send>> {
-    let mut new = Some(stderr);
-    LOCAL_STDERR.with(|slot| {
-        mem::replace(&mut *slot.borrow_mut(), new.take())
-    }).and_then(|mut s| {
-        let _ = s.flush();
-        Some(s)
-    })
-}
-
-// Helper to access the local task's stdout handle
-//
-// Note that this is not a safe function to expose because you can create an
-// aliased pointer very easily:
-//
-//  with_task_stdout(|io1| {
-//      with_task_stdout(|io2| {
-//          // io1 aliases io2
-//      })
-//  })
-fn with_task_stdout<F>(f: F) where F: FnOnce(&mut Writer) -> IoResult<()> {
-    let mut my_stdout = LOCAL_STDOUT.with(|slot| {
-        slot.borrow_mut().take()
-    }).unwrap_or_else(|| {
-        box stdout() as Box<Writer + Send>
-    });
-    let result = f(&mut *my_stdout);
-    let mut var = Some(my_stdout);
-    LOCAL_STDOUT.with(|slot| {
-        *slot.borrow_mut() = var.take();
-    });
-    match result {
-        Ok(()) => {}
-        Err(e) => panic!("failed printing to stdout: {:?}", e),
-    }
-}
-
-/// Flushes the local task's stdout handle.
-///
-/// By default, this stream is a line-buffering stream, so flushing may be
-/// necessary to ensure that all output is printed to the screen (if there are
-/// no newlines printed).
-///
-/// Note that logging macros do not use this stream. Using the logging macros
-/// will emit output to stderr, and while they are line buffered the log
-/// messages are always terminated in a newline (no need to flush).
-pub fn flush() {
-    with_task_stdout(|io| io.flush())
-}
-
-/// Prints a string to the stdout of the current process. No newline is emitted
-/// after the string is printed.
-pub fn print(s: &str) {
-    with_task_stdout(|io| io.write(s.as_bytes()))
-}
-
-/// Prints a string to the stdout of the current process. A literal
-/// `\n` character is printed to the console after the string.
-pub fn println(s: &str) {
-    with_task_stdout(|io| {
-        io.write(s.as_bytes()).and_then(|()| io.write(&[b'\n']))
-    })
-}
-
-/// Similar to `print`, but takes a `fmt::Arguments` structure to be compatible
-/// with the `format_args!` macro.
-pub fn print_args(fmt: fmt::Arguments) {
-    with_task_stdout(|io| write!(io, "{}", fmt))
-}
-
-/// Similar to `println`, but takes a `fmt::Arguments` structure to be
-/// compatible with the `format_args!` macro.
-pub fn println_args(fmt: fmt::Arguments) {
-    with_task_stdout(|io| writeln!(io, "{}", fmt))
-}
-
-/// Representation of a reader of a standard input stream
-pub struct StdReader {
-    inner: StdSource
-}
-
-impl StdReader {
-    /// Returns whether this stream is attached to a TTY instance or not.
-    pub fn isatty(&self) -> bool {
-        match self.inner {
-            TTY(..) => true,
-            File(..) => false,
-        }
-    }
-}
-
-impl Reader for StdReader {
-    fn read(&mut self, buf: &mut [u8]) -> IoResult<uint> {
-        let ret = match self.inner {
-            TTY(ref mut tty) => {
-                // Flush the task-local stdout so that weird issues like a
-                // print!'d prompt not being shown until after the user hits
-                // enter.
-                flush();
-                tty.read(buf).map(|i| i as uint)
-            },
-            File(ref mut file) => file.read(buf).map(|i| i as uint),
-        };
-        match ret {
-            // When reading a piped stdin, libuv will return 0-length reads when
-            // stdin reaches EOF. For pretty much all other streams it will
-            // return an actual EOF error, but apparently for stdin it's a
-            // little different. Hence, here we convert a 0 length read to an
-            // end-of-file indicator so the caller knows to stop reading.
-            Ok(0) => { Err(standard_error(EndOfFile)) }
-            ret @ Ok(..) | ret @ Err(..) => ret,
-        }
-    }
-}
-
-/// Representation of a writer to a standard output stream
-pub struct StdWriter {
-    inner: StdSource
-}
-
-unsafe impl Send for StdWriter {}
-unsafe impl Sync for StdWriter {}
-
-impl StdWriter {
-    /// Gets the size of this output window, if possible. This is typically used
-    /// when the writer is attached to something like a terminal, this is used
-    /// to fetch the dimensions of the terminal.
-    ///
-    /// If successful, returns `Ok((width, height))`.
-    ///
-    /// # Error
-    ///
-    /// This function will return an error if the output stream is not actually
-    /// connected to a TTY instance, or if querying the TTY instance fails.
-    pub fn winsize(&mut self) -> IoResult<(int, int)> {
-        match self.inner {
-            TTY(ref mut tty) => {
-                tty.get_winsize()
-            }
-            File(..) => {
-                Err(IoError {
-                    kind: OtherIoError,
-                    desc: "stream is not a tty",
-                    detail: None,
-                })
-            }
-        }
-    }
-
-    /// Controls whether this output stream is a "raw stream" or simply a normal
-    /// stream.
-    ///
-    /// # Error
-    ///
-    /// This function will return an error if the output stream is not actually
-    /// connected to a TTY instance, or if querying the TTY instance fails.
-    pub fn set_raw(&mut self, raw: bool) -> IoResult<()> {
-        match self.inner {
-            TTY(ref mut tty) => {
-                tty.set_raw(raw)
-            }
-            File(..) => {
-                Err(IoError {
-                    kind: OtherIoError,
-                    desc: "stream is not a tty",
-                    detail: None,
-                })
-            }
-        }
-    }
-
-    /// Returns whether this stream is attached to a TTY instance or not.
-    pub fn isatty(&self) -> bool {
-        match self.inner {
-            TTY(..) => true,
-            File(..) => false,
-        }
-    }
-}
-
-impl Writer for StdWriter {
-    fn write(&mut self, buf: &[u8]) -> IoResult<()> {
-        // As with stdin on windows, stdout often can't handle writes of large
-        // sizes. For an example, see #14940. For this reason, chunk the output
-        // buffer on windows, but on unix we can just write the whole buffer all
-        // at once.
-        //
-        // For some other references, it appears that this problem has been
-        // encountered by others [1] [2]. We choose the number 8KB just because
-        // libuv does the same.
-        //
-        // [1]: https://tahoe-lafs.org/trac/tahoe-lafs/ticket/1232
-        // [2]: http://www.mail-archive.com/log4net-dev@logging.apache.org/msg00661.html
-        let max_size = if cfg!(windows) {8192} else {uint::MAX};
-        for chunk in buf.chunks(max_size) {
-            try!(match self.inner {
-                TTY(ref mut tty) => tty.write(chunk),
-                File(ref mut file) => file.write(chunk),
-            })
-        }
-        Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use prelude::v1::*;
-
-    use super::*;
-    use sync::mpsc::channel;
-    use thread::Thread;
-
-    #[test]
-    fn smoke() {
-        // Just make sure we can acquire handles
-        stdin();
-        stdout();
-        stderr();
-    }
-
-    #[test]
-    fn capture_stdout() {
-        use io::{ChanReader, ChanWriter};
-
-        let (tx, rx) = channel();
-        let (mut r, w) = (ChanReader::new(rx), ChanWriter::new(tx));
-        let _t = Thread::spawn(move|| {
-            set_stdout(box w);
-            println!("hello!");
-        });
-        assert_eq!(r.read_to_string().unwrap(), "hello!\n");
-    }
-
-    #[test]
-    fn capture_stderr() {
-        use io::{ChanReader, ChanWriter, Reader};
-
-        let (tx, rx) = channel();
-        let (mut r, w) = (ChanReader::new(rx), ChanWriter::new(tx));
-        let _t = Thread::spawn(move || -> () {
-            set_stderr(box w);
-            panic!("my special message");
-        });
-        let s = r.read_to_string().unwrap();
-        assert!(s.contains("my special message"));
-    }
+    fn flush(&mut self) -> io::Result<()> { self.inner.flush() }
 }

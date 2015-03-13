@@ -10,8 +10,8 @@
 
 #[deny(warnings)]
 
-const foo: int = 3;
-//~^ ERROR: should have an uppercase name such as
+const foo: isize = 3;
+//~^ ERROR: should have an upper case name such as
 //~^^ ERROR: constant item is never used
 
 fn main() {}

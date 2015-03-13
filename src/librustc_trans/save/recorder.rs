@@ -13,15 +13,17 @@ pub use self::Row::*;
 use super::escape;
 use super::span_utils::SpanUtils;
 
-use std::vec::Vec;
+use std::io::Write;
 
 use syntax::ast;
 use syntax::ast::{NodeId,DefId};
 use syntax::codemap::*;
 
+const ZERO_DEF_ID: DefId = DefId { node: 0, krate: 0 };
+
 pub struct Recorder {
     // output file
-    pub out: Box<Writer+'static>,
+    pub out: Box<Write+'static>,
     pub dump_spans: bool,
 }
 
@@ -41,14 +43,13 @@ impl Recorder {
         assert!(self.dump_spans);
         let result = format!("span,kind,{},{},text,\"{}\"\n",
                              kind, su.extent_str(span), escape(su.snippet(span)));
-        self.record(result.index(&FullRange));
+        self.record(&result[..]);
     }
 }
 
 pub struct FmtStrs<'a> {
     pub recorder: Box<Recorder>,
     span: SpanUtils<'a>,
-    krate: String,
 }
 
 macro_rules! s { ($e:expr) => { format!("{}", $e) }}
@@ -61,7 +62,7 @@ macro_rules! svec {
     })
 }
 
-#[derive(Copy,Show)]
+#[derive(Copy, Debug, Eq, PartialEq)]
 pub enum Row {
     Variable,
     Enum,
@@ -90,11 +91,10 @@ pub enum Row {
 }
 
 impl<'a> FmtStrs<'a> {
-    pub fn new(rec: Box<Recorder>, span: SpanUtils<'a>, krate: String) -> FmtStrs<'a> {
+    pub fn new(rec: Box<Recorder>, span: SpanUtils<'a>) -> FmtStrs<'a> {
         FmtStrs {
             recorder: rec,
             span: span,
-            krate: krate,
         }
     }
 
@@ -121,7 +121,9 @@ impl<'a> FmtStrs<'a> {
             MethodDecl => ("method_decl", vec!("id","qualname","scopeid"), true, true),
             Struct => ("struct", vec!("id","ctor_id","qualname","scopeid","value"), true, true),
             Trait => ("trait", vec!("id","qualname","scopeid","value"), true, true),
-            Impl => ("impl", vec!("id","refid","refidcrate","scopeid"), true, true),
+            Impl => ("impl",
+                     vec!("id","refid","refidcrate","traitid","traitidcrate","scopeid"),
+                     true, true),
             Module => ("module", vec!("id","qualname","scopeid","def_file"), true, false),
             UseAlias => ("use_alias",
                          vec!("id","refid","refidcrate","name","scopeid"),
@@ -158,33 +160,24 @@ impl<'a> FmtStrs<'a> {
                            values: Vec<String>,
                            span: Span) -> Option<String> {
         if values.len() != fields.len() {
-            self.span.sess.span_bug(span, format!(
+            self.span.sess.span_bug(span, &format!(
                 "Mismatch between length of fields for '{}', expected '{}', found '{}'",
-                kind, fields.len(), values.len()).index(&FullRange));
+                kind, fields.len(), values.len()));
         }
 
         let values = values.iter().map(|s| {
             // Never take more than 1020 chars
             if s.len() > 1020 {
-                s.index(&(0..1020))
+                &s[..1020]
             } else {
-                s.index(&FullRange)
+                &s[..]
             }
         });
 
         let pairs = fields.iter().zip(values);
-        let strs = pairs.map(|(f, v)| format!(",{},\"{}\"", f, escape(
-            if *f == "qualname" && v.len() > 0 {
-                let mut n = self.krate.clone();
-                n.push_str("::");
-                n.push_str(v);
-                n
-            } else {
-                String::from_str(v)
-            }
-        )));
+        let strs = pairs.map(|(f, v)| format!(",{},\"{}\"", f, escape(String::from_str(v))));
         Some(strs.fold(String::new(), |mut s, ss| {
-            s.push_str(ss.index(&FullRange));
+            s.push_str(&ss[..]);
             s
         }))
     }
@@ -196,9 +189,9 @@ impl<'a> FmtStrs<'a> {
         let (label, ref fields, needs_span, dump_spans) = FmtStrs::lookup_row(kind);
 
         if needs_span {
-            self.span.sess.span_bug(span, format!(
+            self.span.sess.span_bug(span, &format!(
                 "Called record_without_span for '{}' which does requires a span",
-                label).index(&FullRange));
+                label));
         }
         assert!(!dump_spans);
 
@@ -212,9 +205,9 @@ impl<'a> FmtStrs<'a> {
         };
 
         let mut result = String::from_str(label);
-        result.push_str(values_str.index(&FullRange));
+        result.push_str(&values_str[..]);
         result.push_str("\n");
-        self.recorder.record(result.index(&FullRange));
+        self.recorder.record(&result[..]);
     }
 
     pub fn record_with_span(&mut self,
@@ -236,8 +229,8 @@ impl<'a> FmtStrs<'a> {
 
         if !needs_span {
             self.span.sess.span_bug(span,
-                                    format!("Called record_with_span for '{}' \
-                                             which does not require a span", label).as_slice());
+                                    &format!("Called record_with_span for '{}' \
+                                              which does not require a span", label));
         }
 
         let values_str = match self.make_values_str(label, fields, values, span) {
@@ -245,7 +238,7 @@ impl<'a> FmtStrs<'a> {
             None => return,
         };
         let result = format!("{},{}{}\n", label, self.span.extent_str(sub_span), values_str);
-        self.recorder.record(result.index(&FullRange));
+        self.recorder.record(&result[..]);
     }
 
     pub fn check_and_record(&mut self,
@@ -275,11 +268,11 @@ impl<'a> FmtStrs<'a> {
         // variable def's node id
         let mut qualname = String::from_str(name);
         qualname.push_str("$");
-        qualname.push_str(id.to_string().index(&FullRange));
+        qualname.push_str(&id.to_string());
         self.check_and_record(Variable,
                               span,
                               sub_span,
-                              svec!(id, name, qualname, value, typ, 0u));
+                              svec!(id, name, qualname, value, typ, 0));
     }
 
     // formal parameters
@@ -296,7 +289,7 @@ impl<'a> FmtStrs<'a> {
         self.check_and_record(Variable,
                               span,
                               sub_span,
-                              svec!(id, name, qualname, "", typ, 0u));
+                              svec!(id, name, qualname, "", typ, 0));
     }
 
     // value is the initialising expression of the static if it is not mut, otherwise "".
@@ -444,12 +437,20 @@ impl<'a> FmtStrs<'a> {
                     span: Span,
                     sub_span: Option<Span>,
                     id: NodeId,
-                    ref_id: DefId,
+                    ref_id: Option<DefId>,
+                    trait_id: Option<DefId>,
                     scope_id: NodeId) {
+        let ref_id = ref_id.unwrap_or(ZERO_DEF_ID);
+        let trait_id = trait_id.unwrap_or(ZERO_DEF_ID);
         self.check_and_record(Impl,
                               span,
                               sub_span,
-                              svec!(id, ref_id.node, ref_id.krate, scope_id));
+                              svec!(id,
+                                    ref_id.node,
+                                    ref_id.krate,
+                                    trait_id.node,
+                                    trait_id.krate,
+                                    scope_id));
     }
 
     pub fn mod_str(&mut self,
@@ -495,13 +496,13 @@ impl<'a> FmtStrs<'a> {
     }
 
     pub fn extern_crate_str(&mut self,
-                          span: Span,
-                          sub_span: Option<Span>,
-                          id: NodeId,
-                          cnum: ast::CrateNum,
-                          name: &str,
-                          loc: &str,
-                          parent: NodeId) {
+                            span: Span,
+                            sub_span: Option<Span>,
+                            id: NodeId,
+                            cnum: ast::CrateNum,
+                            name: &str,
+                            loc: &str,
+                            parent: NodeId) {
         self.check_and_record(ExternCrate,
                               span,
                               sub_span,
@@ -519,7 +520,7 @@ impl<'a> FmtStrs<'a> {
                               svec!(base_id.node,
                                     base_id.krate,
                                     deriv_id,
-                                    0u));
+                                    0));
     }
 
     pub fn fn_call_str(&mut self,
@@ -561,7 +562,7 @@ impl<'a> FmtStrs<'a> {
         self.record_with_span(ModRef,
                               span,
                               sub_span,
-                              svec!(0u, 0u, qualname, parent));
+                              svec!(0, 0, qualname, parent));
     }
 
     pub fn typedef_str(&mut self,
@@ -602,7 +603,7 @@ impl<'a> FmtStrs<'a> {
         self.record_with_span(TypeRef,
                               span,
                               sub_span,
-                              svec!(0u, 0u, qualname, 0u));
+                              svec!(0, 0, qualname, 0));
     }
 
     // A slightly generic function for a reference to an item of any kind.

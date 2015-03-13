@@ -12,7 +12,11 @@
 // clause does not exist, instead of the unsympathetic "match arms have incompatible types"
 
 fn main() {
-    if let Some(homura) = Some("madoka") { //~ ERROR missing an else clause: expected `()`
-        765i32
+    if let Some(homura) = Some("madoka") { //~  ERROR missing an else clause
+                                           //~| expected `()`
+                                           //~| found `_`
+                                           //~| expected ()
+                                           //~| found integral variable
+        765
     };
 }

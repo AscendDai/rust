@@ -8,16 +8,16 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#[derive(Show)]
+#[derive(Debug)]
 struct foo {
-  i: int,
+  i: isize,
 }
 
 impl Drop for foo {
     fn drop(&mut self) {}
 }
 
-fn foo(i:int) -> foo {
+fn foo(i:isize) -> foo {
     foo {
         i: i
     }

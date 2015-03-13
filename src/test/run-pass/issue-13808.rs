@@ -14,7 +14,8 @@ struct Foo<'a> {
 
 impl<'a> Foo<'a> {
     fn new<F>(listener: F) -> Foo<'a> where F: FnMut() + 'a {
-        Foo { listener: box listener }
+        // FIXME (#22405): Replace `Box::new` with `box` here when/if possible.
+        Foo { listener: Box::new(listener) }
     }
 }
 

@@ -29,7 +29,7 @@ pub fn expand_deriving_clone<F>(cx: &mut ExtCtxt,
     let trait_def = TraitDef {
         span: span,
         attributes: Vec::new(),
-        path: Path::new(vec!("std", "clone", "Clone")),
+        path: path_std!(cx, core::clone::Clone),
         additional_bounds: Vec::new(),
         generics: LifetimeBounds::empty(),
         methods: vec!(
@@ -38,13 +38,14 @@ pub fn expand_deriving_clone<F>(cx: &mut ExtCtxt,
                 generics: LifetimeBounds::empty(),
                 explicit_self: borrowed_explicit_self(),
                 args: Vec::new(),
-                ret_ty: Self,
+                ret_ty: Self_,
                 attributes: attrs,
-                combine_substructure: combine_substructure(box |c, s, sub| {
+                combine_substructure: combine_substructure(Box::new(|c, s, sub| {
                     cs_clone("Clone", c, s, sub)
-                }),
+                })),
             }
-        )
+        ),
+        associated_types: Vec::new(),
     };
 
     trait_def.expand(cx, mitem, item, push)
@@ -57,12 +58,12 @@ fn cs_clone(
     let ctor_path;
     let all_fields;
     let fn_path = vec![
-        cx.ident_of("std"),
+        cx.ident_of_std("core"),
         cx.ident_of("clone"),
         cx.ident_of("Clone"),
         cx.ident_of("clone"),
     ];
-    let subcall = |&: field: &FieldInfo| {
+    let subcall = |field: &FieldInfo| {
         let args = vec![cx.expr_addr_of(field.span, field.self_.clone())];
 
         cx.expr_call_global(field.span, fn_path.clone(), args)
@@ -79,12 +80,12 @@ fn cs_clone(
         },
         EnumNonMatchingCollapsed (..) => {
             cx.span_bug(trait_span,
-                        format!("non-matching enum variants in \
-                                 `deriving({})`", name).index(&FullRange))
+                        &format!("non-matching enum variants in \
+                                 `derive({})`", name))
         }
         StaticEnum(..) | StaticStruct(..) => {
             cx.span_bug(trait_span,
-                        format!("static method in `deriving({})`", name).index(&FullRange))
+                        &format!("static method in `derive({})`", name))
         }
     }
 
@@ -100,8 +101,8 @@ fn cs_clone(
                 Some(i) => i,
                 None => {
                     cx.span_bug(trait_span,
-                                format!("unnamed field in normal struct in \
-                                         `deriving({})`", name).index(&FullRange))
+                                &format!("unnamed field in normal struct in \
+                                         `derive({})`", name))
                 }
             };
             cx.field_imm(field.span, ident, subcall(field))

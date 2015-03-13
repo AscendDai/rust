@@ -21,6 +21,6 @@ fn parameterized(x: &uint) -> uint {
 }
 
 pub fn main() {
-    let x = 3u;
-    assert_eq!(parameterized(&x), 3u);
+    let x = 3;
+    assert_eq!(parameterized(&x), 3);
 }

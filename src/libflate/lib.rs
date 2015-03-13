@@ -14,13 +14,21 @@
 //! [def]: https://en.wikipedia.org/wiki/DEFLATE
 //! [mz]: https://code.google.com/p/miniz/
 
+// Do not remove on snapshot creation. Needed for bootstrap. (Issue #22364)
+#![cfg_attr(stage0, feature(custom_attribute))]
 #![crate_name = "flate"]
-#![experimental]
+#![unstable(feature = "rustc_private")]
+#![staged_api]
 #![crate_type = "rlib"]
 #![crate_type = "dylib"]
 #![doc(html_logo_url = "http://www.rust-lang.org/logos/rust-logo-128x128-blk-v2.png",
        html_favicon_url = "http://www.rust-lang.org/favicon.ico",
        html_root_url = "http://doc.rust-lang.org/nightly/")]
+
+#![feature(int_uint)]
+#![feature(libc)]
+#![feature(staged_api)]
+#![feature(unique)]
 
 #[cfg(test)] #[macro_use] extern crate log;
 
@@ -39,13 +47,13 @@ pub struct Bytes {
 impl Deref for Bytes {
     type Target = [u8];
     fn deref(&self) -> &[u8] {
-        unsafe { slice::from_raw_mut_buf(&self.ptr.0, self.len) }
+        unsafe { slice::from_raw_parts(*self.ptr, self.len) }
     }
 }
 
 impl Drop for Bytes {
     fn drop(&mut self) {
-        unsafe { libc::free(self.ptr.0 as *mut _); }
+        unsafe { libc::free(*self.ptr as *mut _); }
     }
 }
 
@@ -66,9 +74,9 @@ extern {
                                     -> *mut c_void;
 }
 
-static LZ_NORM : c_int = 0x80;  // LZ with 128 probes, "normal"
-static TINFL_FLAG_PARSE_ZLIB_HEADER : c_int = 0x1; // parse zlib header and adler32 checksum
-static TDEFL_WRITE_ZLIB_HEADER : c_int = 0x01000; // write zlib header and adler32 checksum
+const LZ_NORM: c_int = 0x80;  // LZ with 128 probes, "normal"
+const TINFL_FLAG_PARSE_ZLIB_HEADER: c_int = 0x1; // parse zlib header and adler32 checksum
+const TDEFL_WRITE_ZLIB_HEADER: c_int = 0x01000; // write zlib header and adler32 checksum
 
 fn deflate_bytes_internal(bytes: &[u8], flags: c_int) -> Option<Bytes> {
     unsafe {
@@ -78,7 +86,7 @@ fn deflate_bytes_internal(bytes: &[u8], flags: c_int) -> Option<Bytes> {
                                              &mut outsz,
                                              flags);
         if !res.is_null() {
-            let res = Unique(res as *mut u8);
+            let res = Unique::new(res as *mut u8);
             Some(Bytes { ptr: res, len: outsz as uint })
         } else {
             None
@@ -104,7 +112,7 @@ fn inflate_bytes_internal(bytes: &[u8], flags: c_int) -> Option<Bytes> {
                                                &mut outsz,
                                                flags);
         if !res.is_null() {
-            let res = Unique(res as *mut u8);
+            let res = Unique::new(res as *mut u8);
             Some(Bytes { ptr: res, len: outsz as uint })
         } else {
             None
@@ -124,6 +132,7 @@ pub fn inflate_bytes_zlib(bytes: &[u8]) -> Option<Bytes> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(deprecated)]
     use super::{inflate_bytes, deflate_bytes};
     use std::rand;
     use std::rand::Rng;
@@ -132,32 +141,32 @@ mod tests {
     fn test_flate_round_trip() {
         let mut r = rand::thread_rng();
         let mut words = vec!();
-        for _ in range(0u, 20) {
-            let range = r.gen_range(1u, 10);
+        for _ in 0..20 {
+            let range = r.gen_range(1, 10);
             let v = r.gen_iter::<u8>().take(range).collect::<Vec<u8>>();
             words.push(v);
         }
-        for _ in range(0u, 20) {
+        for _ in 0..20 {
             let mut input = vec![];
-            for _ in range(0u, 2000) {
-                input.push_all(r.choose(words.as_slice()).unwrap().as_slice());
+            for _ in 0..2000 {
+                input.push_all(r.choose(&words).unwrap());
             }
             debug!("de/inflate of {} bytes of random word-sequences",
                    input.len());
-            let cmp = deflate_bytes(input.as_slice()).expect("deflation failed");
-            let out = inflate_bytes(cmp.as_slice()).expect("inflation failed");
+            let cmp = deflate_bytes(&input).expect("deflation failed");
+            let out = inflate_bytes(&cmp).expect("inflation failed");
             debug!("{} bytes deflated to {} ({:.1}% size)",
                    input.len(), cmp.len(),
                    100.0 * ((cmp.len() as f64) / (input.len() as f64)));
-            assert_eq!(input, out.as_slice());
+            assert_eq!(&*input, &*out);
         }
     }
 
     #[test]
     fn test_zlib_flate() {
         let bytes = vec!(1, 2, 3, 4, 5);
-        let deflated = deflate_bytes(bytes.as_slice()).expect("deflation failed");
-        let inflated = inflate_bytes(deflated.as_slice()).expect("inflation failed");
-        assert_eq!(inflated.as_slice(), bytes);
+        let deflated = deflate_bytes(&bytes).expect("deflation failed");
+        let inflated = inflate_bytes(&deflated).expect("inflation failed");
+        assert_eq!(&*inflated, &*bytes);
     }
 }

@@ -10,20 +10,23 @@
 
 use std::cell::RefCell;
 
+// FIXME (#22405): Replace `Box::new` with `box` here when/if possible.
+
 fn main() {
+    let mut y = 1;
     let c = RefCell::new(vec![]);
-    let mut y = 1u;
-    c.push(box || y = 0);
-    c.push(box || y = 0);
+    c.push(Box::new(|| y = 0));
+    c.push(Box::new(|| y = 0));
 //~^ ERROR cannot borrow `y` as mutable more than once at a time
 }
 
 fn ufcs() {
+    let mut y = 1;
     let c = RefCell::new(vec![]);
-    let mut y = 1u;
 
-    Push::push(&c, box || y = 0);
-    Push::push(&c, box || y = 0);
+    Push::push(&c, Box::new(|| y = 0));
+    Push::push(&c, Box::new(|| y = 0));
+//~^ ERROR cannot borrow `y` as mutable more than once at a time
 }
 
 trait Push<'c> {

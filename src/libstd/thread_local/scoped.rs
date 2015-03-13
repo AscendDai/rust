@@ -21,10 +21,10 @@
 //! period of time and it is not required to relinquish ownership of the
 //! contents.
 //!
-//! # Example
+//! # Examples
 //!
 //! ```
-//! scoped_thread_local!(static FOO: uint);
+//! scoped_thread_local!(static FOO: u32);
 //!
 //! // Initially each scoped slot is empty.
 //! assert!(!FOO.is_set());
@@ -38,8 +38,9 @@
 //! });
 //! ```
 
-#![unstable = "scoped TLS has yet to have wide enough use to fully consider \
-               stabilizing its interface"]
+#![unstable(feature = "std_misc",
+            reason = "scoped TLS has yet to have wide enough use to fully consider \
+                      stabilizing its interface")]
 
 use prelude::v1::*;
 
@@ -64,6 +65,7 @@ pub struct Key<T> { #[doc(hidden)] pub inner: __impl::KeyInner<T> }
 /// This macro declares a `static` item on which methods are used to get and
 /// set the value stored within.
 #[macro_export]
+#[allow_internal_unstable]
 macro_rules! scoped_thread_local {
     (static $name:ident: $t:ty) => (
         __scoped_thread_local_inner!(static $name: $t);
@@ -75,11 +77,13 @@ macro_rules! scoped_thread_local {
 
 #[macro_export]
 #[doc(hidden)]
+#[allow_internal_unstable]
 macro_rules! __scoped_thread_local_inner {
     (static $name:ident: $t:ty) => (
         #[cfg_attr(not(any(windows,
                            target_os = "android",
                            target_os = "ios",
+                           target_os = "openbsd",
                            target_arch = "aarch64")),
                    thread_local)]
         static $name: ::std::thread_local::scoped::Key<$t> =
@@ -89,6 +93,7 @@ macro_rules! __scoped_thread_local_inner {
         #[cfg_attr(not(any(windows,
                            target_os = "android",
                            target_os = "ios",
+                           target_os = "openbsd",
                            target_arch = "aarch64")),
                    thread_local)]
         pub static $name: ::std::thread_local::scoped::Key<$t> =
@@ -97,18 +102,26 @@ macro_rules! __scoped_thread_local_inner {
     ($t:ty) => ({
         use std::thread_local::scoped::Key as __Key;
 
-        #[cfg(not(any(windows, target_os = "android", target_os = "ios", target_arch = "aarch64")))]
+        #[cfg(not(any(windows,
+                      target_os = "android",
+                      target_os = "ios",
+                      target_os = "openbsd",
+                      target_arch = "aarch64")))]
         const _INIT: __Key<$t> = __Key {
             inner: ::std::thread_local::scoped::__impl::KeyInner {
                 inner: ::std::cell::UnsafeCell { value: 0 as *mut _ },
             }
         };
 
-        #[cfg(any(windows, target_os = "android", target_os = "ios", target_arch = "aarch64"))]
+        #[cfg(any(windows,
+                  target_os = "android",
+                  target_os = "ios",
+                  target_os = "openbsd",
+                  target_arch = "aarch64"))]
         const _INIT: __Key<$t> = __Key {
             inner: ::std::thread_local::scoped::__impl::KeyInner {
                 inner: ::std::thread_local::scoped::__impl::OS_INIT,
-                marker: ::std::marker::InvariantType,
+                marker: ::std::marker::PhantomData::<::std::cell::Cell<$t>>,
             }
         };
 
@@ -126,10 +139,10 @@ impl<T> Key<T> {
     /// Upon return, this function will restore the previous value, if any
     /// was available.
     ///
-    /// # Example
+    /// # Examples
     ///
     /// ```
-    /// scoped_thread_local!(static FOO: uint);
+    /// scoped_thread_local!(static FOO: u32);
     ///
     /// FOO.set(&100, || {
     ///     let val = FOO.with(|v| *v);
@@ -178,10 +191,10 @@ impl<T> Key<T> {
     ///
     /// This function will panic if `set` has not previously been called.
     ///
-    /// # Example
+    /// # Examples
     ///
     /// ```no_run
-    /// scoped_thread_local!(static FOO: uint);
+    /// scoped_thread_local!(static FOO: u32);
     ///
     /// FOO.with(|slot| {
     ///     // work with `slot`
@@ -204,7 +217,11 @@ impl<T> Key<T> {
     }
 }
 
-#[cfg(not(any(windows, target_os = "android", target_os = "ios", target_arch = "aarch64")))]
+#[cfg(not(any(windows,
+              target_os = "android",
+              target_os = "ios",
+              target_os = "openbsd",
+              target_arch = "aarch64")))]
 mod imp {
     use std::cell::UnsafeCell;
 
@@ -222,15 +239,20 @@ mod imp {
     }
 }
 
-#[cfg(any(windows, target_os = "android", target_os = "ios", target_arch = "aarch64"))]
+#[cfg(any(windows,
+          target_os = "android",
+          target_os = "ios",
+          target_os = "openbsd",
+          target_arch = "aarch64"))]
 mod imp {
     use marker;
+    use std::cell::Cell;
     use sys_common::thread_local::StaticKey as OsStaticKey;
 
     #[doc(hidden)]
     pub struct KeyInner<T> {
         pub inner: OsStaticKey,
-        pub marker: marker::InvariantType<T>,
+        pub marker: marker::PhantomData<Cell<T>>,
     }
 
     unsafe impl<T> ::marker::Sync for KeyInner<T> { }
@@ -250,11 +272,11 @@ mod tests {
     use cell::Cell;
     use prelude::v1::*;
 
-    scoped_thread_local!(static FOO: uint);
+    scoped_thread_local!(static FOO: u32);
 
     #[test]
     fn smoke() {
-        scoped_thread_local!(static BAR: uint);
+        scoped_thread_local!(static BAR: u32);
 
         assert!(!BAR.is_set());
         BAR.set(&1, || {
@@ -268,7 +290,7 @@ mod tests {
 
     #[test]
     fn cell_allowed() {
-        scoped_thread_local!(static BAR: Cell<uint>);
+        scoped_thread_local!(static BAR: Cell<u32>);
 
         BAR.set(&Cell::new(1), || {
             BAR.with(|slot| {

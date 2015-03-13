@@ -8,8 +8,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-fn blah() -> int { //~ ERROR not all control paths return a value
-    1i
+fn blah() -> i32 { //~ ERROR not all control paths return a value
+    1
 
     ; //~ HELP consider removing this semicolon:
 }

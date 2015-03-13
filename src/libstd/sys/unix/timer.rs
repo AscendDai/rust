@@ -49,7 +49,7 @@
 use prelude::v1::*;
 use self::Req::*;
 
-use io::IoResult;
+use old_io::IoResult;
 use libc;
 use mem;
 use os;
@@ -100,7 +100,7 @@ pub fn now() -> u64 {
 fn helper(input: libc::c_int, messages: Receiver<Req>, _: ()) {
     let mut set: c::fd_set = unsafe { mem::zeroed() };
 
-    let mut fd = FileDesc::new(input, true);
+    let fd = FileDesc::new(input, true);
     let mut timeout: libc::timeval = unsafe { mem::zeroed() };
 
     // active timers are those which are able to be selected upon (and it's a
@@ -198,7 +198,7 @@ fn helper(input: libc::c_int, messages: Receiver<Req>, _: ()) {
                 assert_eq!(fd.read(&mut buf).ok().unwrap(), 1);
             }
 
-            -1 if os::errno() == libc::EINTR as uint => {}
+            -1 if os::errno() == libc::EINTR as i32 => {}
             n => panic!("helper thread failed in select() with error: {} ({})",
                        n, os::last_os_error())
         }
@@ -211,7 +211,7 @@ impl Timer {
         // instead of ()
         HELPER.boot(|| {}, helper);
 
-        static ID: atomic::AtomicUint = atomic::ATOMIC_UINT_INIT;
+        static ID: atomic::AtomicUsize = atomic::ATOMIC_USIZE_INIT;
         let id = ID.fetch_add(1, Ordering::Relaxed);
         Ok(Timer {
             id: id,

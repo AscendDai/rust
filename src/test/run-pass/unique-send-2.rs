@@ -8,8 +8,11 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![allow(unknown_features)]
+#![feature(box_syntax)]
+
 use std::sync::mpsc::{channel, Sender};
-use std::thread::Thread;
+use std::thread;
 
 fn child(tx: &Sender<Box<uint>>, i: uint) {
     tx.send(box i).unwrap();
@@ -17,18 +20,18 @@ fn child(tx: &Sender<Box<uint>>, i: uint) {
 
 pub fn main() {
     let (tx, rx) = channel();
-    let n = 100u;
-    let mut expected = 0u;
-    for i in range(0u, n) {
-        let tx = tx.clone();
-        Thread::spawn(move|| {
-            child(&tx, i)
-        });
+    let n = 100;
+    let mut expected = 0;
+    let _t = (0..n).map(|i| {
         expected += i;
-    }
+        let tx = tx.clone();
+        thread::spawn(move|| {
+            child(&tx, i)
+        })
+    }).collect::<Vec<_>>();
 
-    let mut actual = 0u;
-    for _ in range(0u, n) {
+    let mut actual = 0;
+    for _ in 0..n {
         let j = rx.recv().unwrap();
         actual += *j;
     }

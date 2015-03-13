@@ -60,9 +60,10 @@
 use prelude::v1::*;
 
 use any::Any;
+use boxed;
 use cell::Cell;
 use cmp;
-use failure;
+use panicking;
 use fmt;
 use intrinsics;
 use libc::c_void;
@@ -74,7 +75,7 @@ use rt::libunwind as uw;
 
 struct Exception {
     uwe: uw::_Unwind_Exception,
-    cause: Option<Box<Any + Send>>,
+    cause: Option<Box<Any + Send + 'static>>,
 }
 
 pub type Callback = fn(msg: &(Any + Send), file: &'static str, line: uint);
@@ -83,23 +84,23 @@ pub type Callback = fn(msg: &(Any + Send), file: &'static str, line: uint);
 //
 // For more information, see below.
 const MAX_CALLBACKS: uint = 16;
-static CALLBACKS: [atomic::AtomicUint; MAX_CALLBACKS] =
-        [atomic::ATOMIC_UINT_INIT, atomic::ATOMIC_UINT_INIT,
-         atomic::ATOMIC_UINT_INIT, atomic::ATOMIC_UINT_INIT,
-         atomic::ATOMIC_UINT_INIT, atomic::ATOMIC_UINT_INIT,
-         atomic::ATOMIC_UINT_INIT, atomic::ATOMIC_UINT_INIT,
-         atomic::ATOMIC_UINT_INIT, atomic::ATOMIC_UINT_INIT,
-         atomic::ATOMIC_UINT_INIT, atomic::ATOMIC_UINT_INIT,
-         atomic::ATOMIC_UINT_INIT, atomic::ATOMIC_UINT_INIT,
-         atomic::ATOMIC_UINT_INIT, atomic::ATOMIC_UINT_INIT];
-static CALLBACK_CNT: atomic::AtomicUint = atomic::ATOMIC_UINT_INIT;
+static CALLBACKS: [atomic::AtomicUsize; MAX_CALLBACKS] =
+        [atomic::ATOMIC_USIZE_INIT, atomic::ATOMIC_USIZE_INIT,
+         atomic::ATOMIC_USIZE_INIT, atomic::ATOMIC_USIZE_INIT,
+         atomic::ATOMIC_USIZE_INIT, atomic::ATOMIC_USIZE_INIT,
+         atomic::ATOMIC_USIZE_INIT, atomic::ATOMIC_USIZE_INIT,
+         atomic::ATOMIC_USIZE_INIT, atomic::ATOMIC_USIZE_INIT,
+         atomic::ATOMIC_USIZE_INIT, atomic::ATOMIC_USIZE_INIT,
+         atomic::ATOMIC_USIZE_INIT, atomic::ATOMIC_USIZE_INIT,
+         atomic::ATOMIC_USIZE_INIT, atomic::ATOMIC_USIZE_INIT];
+static CALLBACK_CNT: atomic::AtomicUsize = atomic::ATOMIC_USIZE_INIT;
 
 thread_local! { static PANICKING: Cell<bool> = Cell::new(false) }
 
 /// Invoke a closure, capturing the cause of panic if one occurs.
 ///
-/// This function will return `None` if the closure did not panic, and will
-/// return `Some(cause)` if the closure panics. The `cause` returned is the
+/// This function will return `Ok(())` if the closure did not panic, and will
+/// return `Err(cause)` if the closure panics. The `cause` returned is the
 /// object with which panic was originally invoked.
 ///
 /// This function also is unsafe for a variety of reasons:
@@ -152,7 +153,7 @@ pub unsafe fn try<F: FnOnce()>(f: F) -> Result<(), Box<Any + Send>> {
     }
 }
 
-/// Test if the current thread is currently panicking.
+/// Determines whether the current thread is unwinding because of panic.
 pub fn panicking() -> bool {
     PANICKING.with(|s| s.get())
 }
@@ -160,11 +161,12 @@ pub fn panicking() -> bool {
 // An uninlined, unmangled function upon which to slap yer breakpoints
 #[inline(never)]
 #[no_mangle]
-fn rust_panic(cause: Box<Any + Send>) -> ! {
+#[allow(private_no_mangle_fns)]
+fn rust_panic(cause: Box<Any + Send + 'static>) -> ! {
     rtdebug!("begin_unwind()");
 
     unsafe {
-        let exception = box Exception {
+        let exception: Box<_> = box Exception {
             uwe: uw::_Unwind_Exception {
                 exception_class: rust_exception_class(),
                 exception_cleanup: exception_cleanup,
@@ -172,7 +174,8 @@ fn rust_panic(cause: Box<Any + Send>) -> ! {
             },
             cause: Some(cause),
         };
-        let error = uw::_Unwind_RaiseException(mem::transmute(exception));
+        let exception_param = boxed::into_raw(exception) as *mut uw::_Unwind_Exception;
+        let error = uw::_Unwind_RaiseException(exception_param);
         rtabort!("Could not unwind stack, error = {}", error as int)
     }
 
@@ -180,7 +183,7 @@ fn rust_panic(cause: Box<Any + Send>) -> ! {
                                 exception: *mut uw::_Unwind_Exception) {
         rtdebug!("exception_cleanup()");
         unsafe {
-            let _: Box<Exception> = mem::transmute(exception);
+            let _: Box<Exception> = Box::from_raw(exception as *mut Exception);
         }
     }
 }
@@ -237,6 +240,7 @@ pub mod eabi {
 
     #[lang="eh_personality"]
     #[no_mangle] // referenced from rust_try.ll
+    #[allow(private_no_mangle_fns)]
     extern fn rust_eh_personality(
         version: c_int,
         actions: uw::_Unwind_Action,
@@ -343,6 +347,7 @@ pub mod eabi {
 
     #[lang="eh_personality"]
     #[no_mangle] // referenced from rust_try.ll
+    #[allow(private_no_mangle_fns)]
     extern "C" fn rust_eh_personality(
         state: uw::_Unwind_State,
         ue_header: *mut uw::_Unwind_Exception,
@@ -386,13 +391,10 @@ pub mod eabi {
     use libc::{c_void, c_int};
 
     #[repr(C)]
-    #[allow(missing_copy_implementations)]
     pub struct EXCEPTION_RECORD;
     #[repr(C)]
-    #[allow(missing_copy_implementations)]
     pub struct CONTEXT;
     #[repr(C)]
-    #[allow(missing_copy_implementations)]
     pub struct DISPATCHER_CONTEXT;
 
     #[repr(C)]
@@ -432,6 +434,7 @@ pub mod eabi {
 
     #[lang="eh_personality"]
     #[no_mangle] // referenced from rust_try.ll
+    #[allow(private_no_mangle_fns)]
     extern "C" fn rust_eh_personality(
         exceptionRecord: *mut EXCEPTION_RECORD,
         establisherFrame: *mut c_void,
@@ -492,8 +495,9 @@ pub extern fn rust_begin_unwind(msg: fmt::Arguments,
 /// on (e.g.) the inlining of other functions as possible), by moving
 /// the actual formatting into this shared place.
 #[inline(never)] #[cold]
+#[stable(since = "1.0.0", feature = "rust1")]
 pub fn begin_unwind_fmt(msg: fmt::Arguments, file_line: &(&'static str, uint)) -> ! {
-    use fmt::Writer;
+    use fmt::Write;
 
     // We do two allocations here, unfortunately. But (a) they're
     // required with the current scheme, and (b) we don't handle
@@ -502,11 +506,12 @@ pub fn begin_unwind_fmt(msg: fmt::Arguments, file_line: &(&'static str, uint)) -
 
     let mut s = String::new();
     let _ = write!(&mut s, "{}", msg);
-    begin_unwind_inner(box s, file_line)
+    begin_unwind_inner(Box::new(s), file_line)
 }
 
 /// This is the entry point of unwinding for panic!() and assert!().
 #[inline(never)] #[cold] // avoid code bloat at the call sites as much as possible
+#[stable(since = "1.0.0", feature = "rust1")]
 pub fn begin_unwind<M: Any + Send>(msg: M, file_line: &(&'static str, uint)) -> ! {
     // Note that this should be the only allocation performed in this code path.
     // Currently this means that panic!() on OOM will invoke this code path,
@@ -516,7 +521,7 @@ pub fn begin_unwind<M: Any + Send>(msg: M, file_line: &(&'static str, uint)) -> 
     // panicking.
 
     // see below for why we do the `Any` coercion here.
-    begin_unwind_inner(box msg, file_line)
+    begin_unwind_inner(Box::new(msg), file_line)
 }
 
 /// The core of the unwinding.
@@ -530,10 +535,10 @@ pub fn begin_unwind<M: Any + Send>(msg: M, file_line: &(&'static str, uint)) -> 
 /// }` from ~1900/3700 (-O/no opts) to 180/590.
 #[inline(never)] #[cold] // this is the slow path, please never inline this
 fn begin_unwind_inner(msg: Box<Any + Send>, file_line: &(&'static str, uint)) -> ! {
-    // Make sure the default failure handler is registered before we look at the
+    // Make sure the default panic handler is registered before we look at the
     // callbacks.
     static INIT: Once = ONCE_INIT;
-    INIT.call_once(|| unsafe { register(failure::on_fail); });
+    INIT.call_once(|| unsafe { register(panicking::on_panic); });
 
     // First, invoke call the user-defined callbacks triggered on thread panic.
     //
@@ -544,9 +549,9 @@ fn begin_unwind_inner(msg: Box<Any + Send>, file_line: &(&'static str, uint)) ->
     // MAX_CALLBACKS, so we're sure to clamp it as necessary.
     let callbacks = {
         let amt = CALLBACK_CNT.load(Ordering::SeqCst);
-        CALLBACKS.index(&(0..cmp::min(amt, MAX_CALLBACKS)))
+        &CALLBACKS[..cmp::min(amt, MAX_CALLBACKS)]
     };
-    for cb in callbacks.iter() {
+    for cb in callbacks {
         match cb.load(Ordering::SeqCst) {
             0 => {}
             n => {
@@ -582,7 +587,7 @@ fn begin_unwind_inner(msg: Box<Any + Send>, file_line: &(&'static str, uint)) ->
 /// Only a limited number of callbacks can be registered, and this function
 /// returns whether the callback was successfully registered or not. It is not
 /// currently possible to unregister a callback once it has been registered.
-#[experimental]
+#[unstable(feature = "std_misc")]
 pub unsafe fn register(f: Callback) -> bool {
     match CALLBACK_CNT.fetch_add(1, Ordering::SeqCst) {
         // The invocation code has knowledge of this window where the count has

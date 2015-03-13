@@ -11,28 +11,28 @@
 // Test that a class with a non-copyable field can't be
 // copied
 
-#[derive(Show)]
+#[derive(Debug)]
 struct bar {
-  x: int,
+  x: isize,
 }
 
 impl Drop for bar {
     fn drop(&mut self) {}
 }
 
-fn bar(x:int) -> bar {
+fn bar(x:isize) -> bar {
     bar {
         x: x
     }
 }
 
-#[derive(Show)]
+#[derive(Debug)]
 struct foo {
-  i: int,
+  i: isize,
   j: bar,
 }
 
-fn foo(i:int) -> foo {
+fn foo(i:isize) -> foo {
     foo {
         i: i,
         j: bar(5)

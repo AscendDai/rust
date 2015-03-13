@@ -9,7 +9,7 @@
 // except according to those terms.
 
 struct direct<'a> {
-    f: &'a int
+    f: &'a isize
 }
 
 struct indirect1 {
@@ -27,5 +27,10 @@ fn take_direct<'a,'b>(p: direct<'a>) -> direct<'b> { p } //~ ERROR mismatched ty
 fn take_indirect1(p: indirect1) -> indirect1 { p }
 
 fn take_indirect2<'a,'b>(p: indirect2<'a>) -> indirect2<'b> { p } //~ ERROR mismatched types
+//~| expected `indirect2<'b>`
+//~| found `indirect2<'a>`
+//~| ERROR mismatched types
+//~| expected `indirect2<'b>`
+//~| found `indirect2<'a>`
 
 fn main() {}

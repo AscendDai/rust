@@ -8,6 +8,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![allow(unknown_features)]
+
 use std::thread::Thread;
 use std::sync::mpsc::Sender;
 use std::thunk::Invoke;
@@ -24,9 +26,9 @@ fn foo(name: String, samples_chan: Sender<Msg>) {
     let _t = Thread::spawn(move|| {
         let mut samples_chan = samples_chan;
 
-        // `box() (...)` syntax is needed to make pretty printer converge in one try:
-        let callback: SamplesFn = box() (move |buffer| {
-            for i in range(0u, buffer.len()) {
+        // FIXME (#22405): Replace `Box::new` with `box` here when/if possible.
+        let callback: SamplesFn = Box::new(move |buffer| {
+            for i in 0..buffer.len() {
                 println!("{}: {}", i, buffer[i])
             }
         });

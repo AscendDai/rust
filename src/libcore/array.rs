@@ -12,107 +12,102 @@
 //! up to a certain length. Eventually we should able to generalize
 //! to all lengths.
 
-#![experimental] // not yet reviewed
+#![unstable(feature = "core")] // not yet reviewed
 
 use clone::Clone;
 use cmp::{PartialEq, Eq, PartialOrd, Ord, Ordering};
 use fmt;
-use marker::Copy;
-use ops::{Deref, FullRange, Index};
+use hash::{Hash, self};
+use iter::IntoIterator;
+use marker::{Copy, Sized};
 use option::Option;
+use slice::{Iter, IterMut, SliceExt};
 
 // macro for implementing n-ary tuple functions and operations
 macro_rules! array_impls {
     ($($N:expr)+) => {
         $(
-            #[stable]
+            #[stable(feature = "rust1", since = "1.0.0")]
             impl<T:Copy> Clone for [T; $N] {
                 fn clone(&self) -> [T; $N] {
                     *self
                 }
             }
 
-            #[unstable = "waiting for Show to stabilize"]
-            impl<T:fmt::Show> fmt::Show for [T; $N] {
+            #[stable(feature = "rust1", since = "1.0.0")]
+            impl<T: Hash> Hash for [T; $N] {
+                fn hash<H: hash::Hasher>(&self, state: &mut H) {
+                    Hash::hash(&self[..], state)
+                }
+            }
+
+            #[stable(feature = "rust1", since = "1.0.0")]
+            impl<T: fmt::Debug> fmt::Debug for [T; $N] {
                 fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-                    fmt::Show::fmt(&self.index(&FullRange), f)
+                    fmt::Debug::fmt(&&self[..], f)
                 }
             }
 
-            #[stable]
-            impl<A, B> PartialEq<[B; $N]> for [A; $N] where A: PartialEq<B> {
-                #[inline]
-                fn eq(&self, other: &[B; $N]) -> bool {
-                    self.index(&FullRange) == other.index(&FullRange)
-                }
-                #[inline]
-                fn ne(&self, other: &[B; $N]) -> bool {
-                    self.index(&FullRange) != other.index(&FullRange)
+            #[stable(feature = "rust1", since = "1.0.0")]
+            impl<'a, T> IntoIterator for &'a [T; $N] {
+                type Item = &'a T;
+                type IntoIter = Iter<'a, T>;
+
+                fn into_iter(self) -> Iter<'a, T> {
+                    self.iter()
                 }
             }
 
-            #[stable]
-            impl<'a, A, B, Rhs> PartialEq<Rhs> for [A; $N] where
-                A: PartialEq<B>,
-                Rhs: Deref<Target=[B]>,
-            {
-                #[inline(always)]
-                fn eq(&self, other: &Rhs) -> bool {
-                    PartialEq::eq(self.index(&FullRange), &**other)
-                }
-                #[inline(always)]
-                fn ne(&self, other: &Rhs) -> bool {
-                    PartialEq::ne(self.index(&FullRange), &**other)
+            #[stable(feature = "rust1", since = "1.0.0")]
+            impl<'a, T> IntoIterator for &'a mut [T; $N] {
+                type Item = &'a mut T;
+                type IntoIter = IterMut<'a, T>;
+
+                fn into_iter(self) -> IterMut<'a, T> {
+                    self.iter_mut()
                 }
             }
 
-            #[stable]
-            impl<'a, A, B, Lhs> PartialEq<[B; $N]> for Lhs where
-                A: PartialEq<B>,
-                Lhs: Deref<Target=[A]>
-            {
-                #[inline(always)]
-                fn eq(&self, other: &[B; $N]) -> bool {
-                    PartialEq::eq(&**self, other.index(&FullRange))
-                }
-                #[inline(always)]
-                fn ne(&self, other: &[B; $N]) -> bool {
-                    PartialEq::ne(&**self, other.index(&FullRange))
-                }
-            }
+            // NOTE: some less important impls are omitted to reduce code bloat
+            __impl_slice_eq1! { [A; $N], [B; $N] }
+            __impl_slice_eq2! { [A; $N], [B] }
+            __impl_slice_eq2! { [A; $N], &'b [B] }
+            __impl_slice_eq2! { [A; $N], &'b mut [B] }
+            // __impl_slice_eq2! { [A; $N], &'b [B; $N] }
+            // __impl_slice_eq2! { [A; $N], &'b mut [B; $N] }
 
-            #[stable]
+            #[stable(feature = "rust1", since = "1.0.0")]
             impl<T:Eq> Eq for [T; $N] { }
 
-            #[stable]
+            #[stable(feature = "rust1", since = "1.0.0")]
             impl<T:PartialOrd> PartialOrd for [T; $N] {
                 #[inline]
                 fn partial_cmp(&self, other: &[T; $N]) -> Option<Ordering> {
-                    PartialOrd::partial_cmp(&self.index(&FullRange), &other.index(&FullRange))
+                    PartialOrd::partial_cmp(&&self[..], &&other[..])
                 }
                 #[inline]
                 fn lt(&self, other: &[T; $N]) -> bool {
-                    PartialOrd::lt(&self.index(&FullRange), &other.index(&FullRange))
+                    PartialOrd::lt(&&self[..], &&other[..])
                 }
                 #[inline]
                 fn le(&self, other: &[T; $N]) -> bool {
-                    PartialOrd::le(&self.index(&FullRange), &other.index(&FullRange))
+                    PartialOrd::le(&&self[..], &&other[..])
                 }
                 #[inline]
                 fn ge(&self, other: &[T; $N]) -> bool {
-                    PartialOrd::ge(&self.index(&FullRange), &other.index(&FullRange))
+                    PartialOrd::ge(&&self[..], &&other[..])
                 }
                 #[inline]
                 fn gt(&self, other: &[T; $N]) -> bool {
-                    PartialOrd::gt(&self.index(&FullRange), &other.index(&FullRange))
+                    PartialOrd::gt(&&self[..], &&other[..])
                 }
             }
 
-            #[stable]
+            #[stable(feature = "rust1", since = "1.0.0")]
             impl<T:Ord> Ord for [T; $N] {
                 #[inline]
                 fn cmp(&self, other: &[T; $N]) -> Ordering {
-                    Ord::cmp(&self.index(&FullRange), &other.index(&FullRange))
+                    Ord::cmp(&&self[..], &&other[..])
                 }
             }
         )+

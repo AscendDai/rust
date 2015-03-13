@@ -81,6 +81,9 @@ pub const unwinder_private_data_size: uint = 2;
 #[cfg(any(target_arch = "mips", target_arch = "mipsel"))]
 pub const unwinder_private_data_size: uint = 2;
 
+#[cfg(target_arch = "powerpc")]
+pub const unwinder_private_data_size: uint = 2;
+
 #[repr(C)]
 pub struct _Unwind_Exception {
     pub exception_class: _Unwind_Exception_Class,
@@ -98,12 +101,16 @@ pub type _Unwind_Exception_Cleanup_Fn =
 #[link(name = "gcc_s")]
 extern {}
 
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "openbsd"))]
 #[link(name = "gcc")]
 extern {}
 
 #[cfg(target_os = "dragonfly")]
 #[link(name = "gcc_pic")]
+extern {}
+
+#[cfg(target_os = "bitrig")]
+#[link(name = "c++abi")]
 extern {}
 
 extern "C" {

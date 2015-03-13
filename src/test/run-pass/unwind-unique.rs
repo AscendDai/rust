@@ -8,13 +8,17 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::thread::Thread;
+#![allow(unknown_features)]
+#![feature(box_syntax)]
+
+use std::thread;
 
 fn f() {
-    let _a = box 0i;
+    let _a: Box<_> = box 0;
     panic!();
 }
 
 pub fn main() {
-    let _t = Thread::spawn(f);
+    let t = thread::spawn(f);
+    drop(t.join());
 }

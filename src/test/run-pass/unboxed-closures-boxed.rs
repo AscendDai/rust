@@ -8,13 +8,15 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![allow(unknown_features)]
+#![feature(box_syntax)]
 #![feature(unboxed_closures)]
 
 use std::ops::FnMut;
 
- fn make_adder(x: int) -> Box<FnMut<(int,),int>+'static> {
-    (box move |&mut: y: int| -> int { x + y }) as
-        Box<FnMut<(int,),int>+'static>
+ fn make_adder(x: i32) -> Box<FnMut(i32)->i32+'static> {
+    (box move |y: i32| -> i32 { x + y }) as
+        Box<FnMut(i32)->i32+'static>
 }
 
 pub fn main() {

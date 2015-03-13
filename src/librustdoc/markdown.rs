@@ -8,7 +8,10 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::io;
+use std::fs::File;
+use std::io::Write;
+use std::old_io;
+use std::path::{PathBuf, Path};
 
 use core;
 use getopts;
@@ -28,10 +31,10 @@ fn extract_leading_metadata<'a>(s: &'a str) -> (Vec<&'a str>, &'a str) {
     for line in s.lines() {
         if line.starts_with("%") {
             // remove %<whitespace>
-            metadata.push(line.slice_from(1).trim_left())
+            metadata.push(line[1..].trim_left())
         } else {
             let line_start_byte = s.subslice_offset(line);
-            return (metadata, s.slice_from(line_start_byte));
+            return (metadata, &s[line_start_byte..]);
         }
     }
     // if we're here, then all lines were metadata % lines.
@@ -40,16 +43,16 @@ fn extract_leading_metadata<'a>(s: &'a str) -> (Vec<&'a str>, &'a str) {
 
 /// Render `input` (e.g. "foo.md") into an HTML file in `output`
 /// (e.g. output = "bar" => "bar/foo.html").
-pub fn render(input: &str, mut output: Path, matches: &getopts::Matches,
+pub fn render(input: &str, mut output: PathBuf, matches: &getopts::Matches,
               external_html: &ExternalHtml, include_toc: bool) -> int {
     let input_p = Path::new(input);
-    output.push(input_p.filestem().unwrap());
+    output.push(input_p.file_stem().unwrap());
     output.set_extension("html");
 
     let mut css = String::new();
-    for name in matches.opt_strs("markdown-css").iter() {
+    for name in &matches.opt_strs("markdown-css") {
         let s = format!("<link rel=\"stylesheet\" type=\"text/css\" href=\"{}\">\n", name);
-        css.push_str(s.as_slice())
+        css.push_str(&s)
     }
 
     let input_str = load_or_return!(input, 1, 2);
@@ -59,9 +62,9 @@ pub fn render(input: &str, mut output: Path, matches: &getopts::Matches,
     }
     let playground = playground.unwrap_or("".to_string());
 
-    let mut out = match io::File::create(&output) {
+    let mut out = match File::create(&output) {
         Err(e) => {
-            let _ = writeln!(&mut io::stderr(),
+            let _ = writeln!(&mut old_io::stderr(),
                              "error opening `{}` for writing: {}",
                              output.display(), e);
             return 4;
@@ -69,13 +72,13 @@ pub fn render(input: &str, mut output: Path, matches: &getopts::Matches,
         Ok(f) => f
     };
 
-    let (metadata, text) = extract_leading_metadata(input_str.as_slice());
+    let (metadata, text) = extract_leading_metadata(&input_str);
     if metadata.len() == 0 {
-        let _ = writeln!(&mut io::stderr(),
+        let _ = writeln!(&mut old_io::stderr(),
                          "invalid markdown file: expecting initial line with `% ...TITLE...`");
         return 5;
     }
-    let title = metadata[0].as_slice();
+    let title = metadata[0];
 
     reset_headers();
 
@@ -91,6 +94,7 @@ pub fn render(input: &str, mut output: Path, matches: &getopts::Matches,
 <html lang="en">
 <head>
     <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="generator" content="rustdoc">
     <title>{title}</title>
 
@@ -125,7 +129,7 @@ pub fn render(input: &str, mut output: Path, matches: &getopts::Matches,
 
     match err {
         Err(e) => {
-            let _ = writeln!(&mut io::stderr(),
+            let _ = writeln!(&mut old_io::stderr(),
                              "error writing to `{}`: {}",
                              output.display(), e);
             6
@@ -140,8 +144,8 @@ pub fn test(input: &str, libs: SearchPaths, externs: core::Externs,
     let input_str = load_or_return!(input, 1, 2);
 
     let mut collector = Collector::new(input.to_string(), libs, externs, true);
-    find_testable_code(input_str.as_slice(), &mut collector);
+    find_testable_code(&input_str, &mut collector);
     test_args.insert(0, "rustdoctest".to_string());
-    testing::test_main(test_args.as_slice(), collector.tests);
+    testing::test_main(&test_args, collector.tests);
     0
 }

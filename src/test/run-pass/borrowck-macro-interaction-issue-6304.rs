@@ -11,6 +11,8 @@
 // Check that we do not ICE when compiling this
 // macro, which reuses the expression `$id`
 
+#![feature(box_patterns)]
+#![feature(box_syntax)]
 
 struct Foo {
   a: int

@@ -8,6 +8,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![allow(unknown_features)]
+#![feature(box_syntax)]
 
 trait get {
     fn get(self) -> int;
@@ -23,7 +25,7 @@ impl<'a> get for &'a int {
 }
 
 pub fn main() {
-    let x = box 6;
+    let x: Box<_> = box 6;
     let y = x.get();
     println!("y={}", y);
     assert_eq!(y, 6);

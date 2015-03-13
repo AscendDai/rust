@@ -33,10 +33,12 @@ use syntax::diagnostic::{ColorConfig, Auto, Always, Never, SpanHandler};
 use syntax::parse;
 use syntax::parse::token::InternedString;
 
+use getopts;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry::{Occupied, Vacant};
-use getopts;
+use std::env;
 use std::fmt;
+use std::path::PathBuf;
 
 use llvm;
 
@@ -79,16 +81,17 @@ pub struct Options {
 
     pub gc: bool,
     pub optimize: OptLevel,
+    pub debug_assertions: bool,
     pub debuginfo: DebugInfoLevel,
     pub lint_opts: Vec<(String, lint::Level)>,
     pub describe_lints: bool,
-    pub output_types: Vec<OutputType> ,
+    pub output_types: Vec<OutputType>,
     // This was mutable for rustpkg, which updates search paths based on the
     // parsed code. It remains mutable in case its replacements wants to use
     // this.
     pub search_paths: SearchPaths,
     pub libs: Vec<(String, cstore::NativeLibraryKind)>,
-    pub maybe_sysroot: Option<Path>,
+    pub maybe_sysroot: Option<PathBuf>,
     pub target_triple: String,
     // User-specified cfg meta items. The compiler itself will add additional
     // items to the crate config, and during parsing the entire crate config
@@ -98,10 +101,11 @@ pub struct Options {
     pub test: bool,
     pub parse_only: bool,
     pub no_trans: bool,
+    pub treat_err_as_bug: bool,
     pub no_analysis: bool,
-    pub debugging_opts: u64,
+    pub debugging_opts: DebuggingOptions,
     /// Whether to write dependency files. It's (enabled, optional filename).
-    pub write_dependency_info: (bool, Option<Path>),
+    pub write_dependency_info: (bool, Option<PathBuf>),
     pub prints: Vec<PrintRequest>,
     pub cg: CodegenOptions,
     pub color: ColorConfig,
@@ -111,11 +115,27 @@ pub struct Options {
     /// An optional name to use as the crate for std during std injection,
     /// written `extern crate std = "name"`. Default to "std". Used by
     /// out-of-tree drivers.
-    pub alt_std_name: Option<String>
+    pub alt_std_name: Option<String>,
+    /// Indicates how the compiler should treat unstable features
+    pub unstable_features: UnstableFeatures
+}
+
+#[derive(Clone, Copy)]
+pub enum UnstableFeatures {
+    /// Hard errors for unstable features are active, as on
+    /// beta/stable channels.
+    Disallow,
+    /// Use the default lint levels
+    Default,
+    /// Errors are bypassed for bootstrapping. This is required any time
+    /// during the build that feature-related lints are set to warn or above
+    /// because the build turns on warnings-as-errors and uses lots of unstable
+    /// features. As a result, this this is always required for building Rust
+    /// itself.
+    Cheat
 }
 
 #[derive(Clone, PartialEq, Eq)]
-#[allow(missing_copy_implementations)]
 pub enum PrintRequest {
     FileNames,
     Sysroot,
@@ -124,7 +144,7 @@ pub enum PrintRequest {
 
 pub enum Input {
     /// Load source from file
-    File(Path),
+    File(PathBuf),
     /// The string is the source
     Str(String)
 }
@@ -132,7 +152,8 @@ pub enum Input {
 impl Input {
     pub fn filestem(&self) -> String {
         match *self {
-            Input::File(ref ifile) => ifile.filestem_str().unwrap().to_string(),
+            Input::File(ref ifile) => ifile.file_stem().unwrap()
+                                           .to_str().unwrap().to_string(),
             Input::Str(_) => "rust_out".to_string(),
         }
     }
@@ -140,14 +161,14 @@ impl Input {
 
 #[derive(Clone)]
 pub struct OutputFilenames {
-    pub out_directory: Path,
+    pub out_directory: PathBuf,
     pub out_filestem: String,
-    pub single_output_file: Option<Path>,
+    pub single_output_file: Option<PathBuf>,
     pub extra: String,
 }
 
 impl OutputFilenames {
-    pub fn path(&self, flavor: OutputType) -> Path {
+    pub fn path(&self, flavor: OutputType) -> PathBuf {
         match self.single_output_file {
             Some(ref path) => return path.clone(),
             None => {}
@@ -155,8 +176,8 @@ impl OutputFilenames {
         self.temp_path(flavor)
     }
 
-    pub fn temp_path(&self, flavor: OutputType) -> Path {
-        let base = self.out_directory.join(self.filestem());
+    pub fn temp_path(&self, flavor: OutputType) -> PathBuf {
+        let base = self.out_directory.join(&self.filestem());
         match flavor {
             OutputTypeBitcode => base.with_extension("bc"),
             OutputTypeAssembly => base.with_extension("s"),
@@ -167,8 +188,8 @@ impl OutputFilenames {
         }
     }
 
-    pub fn with_extension(&self, extension: &str) -> Path {
-        self.out_directory.join(self.filestem()).with_extension(extension)
+    pub fn with_extension(&self, extension: &str) -> PathBuf {
+        self.out_directory.join(&self.filestem()).with_extension(extension)
     }
 
     pub fn filestem(&self) -> String {
@@ -206,8 +227,9 @@ pub fn basic_options() -> Options {
         test: false,
         parse_only: false,
         no_trans: false,
+        treat_err_as_bug: false,
         no_analysis: false,
-        debugging_opts: 0,
+        debugging_opts: basic_debugging_options(),
         write_dependency_info: (false, None),
         prints: Vec::new(),
         cg: basic_codegen_options(),
@@ -217,6 +239,8 @@ pub fn basic_options() -> Options {
         crate_name: None,
         alt_std_name: None,
         libs: Vec::new(),
+        unstable_features: UnstableFeatures::Disallow,
+        debug_assertions: true,
     }
 }
 
@@ -231,110 +255,12 @@ pub enum EntryFnType {
     EntryNone,
 }
 
-#[derive(Copy, PartialEq, PartialOrd, Clone, Ord, Eq, Hash)]
+#[derive(Copy, PartialEq, PartialOrd, Clone, Ord, Eq, Hash, Debug)]
 pub enum CrateType {
     CrateTypeExecutable,
     CrateTypeDylib,
     CrateTypeRlib,
     CrateTypeStaticlib,
-}
-
-macro_rules! debugging_opts {
-    ([ $opt:ident ] $cnt:expr ) => (
-        pub const $opt: u64 = 1 << $cnt;
-    );
-    ([ $opt:ident, $($rest:ident),* ] $cnt:expr ) => (
-        pub const $opt: u64 = 1 << $cnt;
-        debugging_opts! { [ $($rest),* ] $cnt + 1 }
-    )
-}
-
-debugging_opts! {
-    [
-        VERBOSE,
-        TIME_PASSES,
-        COUNT_LLVM_INSNS,
-        TIME_LLVM_PASSES,
-        TRANS_STATS,
-        ASM_COMMENTS,
-        NO_VERIFY,
-        BORROWCK_STATS,
-        NO_LANDING_PADS,
-        DEBUG_LLVM,
-        COUNT_TYPE_SIZES,
-        META_STATS,
-        GC,
-        PRINT_LINK_ARGS,
-        PRINT_LLVM_PASSES,
-        AST_JSON,
-        AST_JSON_NOEXPAND,
-        LS,
-        SAVE_ANALYSIS,
-        PRINT_MOVE_FRAGMENTS,
-        FLOWGRAPH_PRINT_LOANS,
-        FLOWGRAPH_PRINT_MOVES,
-        FLOWGRAPH_PRINT_ASSIGNS,
-        FLOWGRAPH_PRINT_ALL,
-        PRINT_REGION_GRAPH,
-        PARSE_ONLY,
-        NO_TRANS,
-        NO_ANALYSIS,
-        UNSTABLE_OPTIONS,
-        PRINT_ENUM_SIZES
-    ]
-    0
-}
-
-pub fn debugging_opts_map() -> Vec<(&'static str, &'static str, u64)> {
-    vec![("verbose", "in general, enable more debug printouts", VERBOSE),
-     ("time-passes", "measure time of each rustc pass", TIME_PASSES),
-     ("count-llvm-insns", "count where LLVM \
-                           instrs originate", COUNT_LLVM_INSNS),
-     ("time-llvm-passes", "measure time of each LLVM pass",
-      TIME_LLVM_PASSES),
-     ("trans-stats", "gather trans statistics", TRANS_STATS),
-     ("asm-comments", "generate comments into the assembly (may change behavior)",
-      ASM_COMMENTS),
-     ("no-verify", "skip LLVM verification", NO_VERIFY),
-     ("borrowck-stats", "gather borrowck statistics",  BORROWCK_STATS),
-     ("no-landing-pads", "omit landing pads for unwinding",
-      NO_LANDING_PADS),
-     ("debug-llvm", "enable debug output from LLVM", DEBUG_LLVM),
-     ("count-type-sizes", "count the sizes of aggregate types",
-      COUNT_TYPE_SIZES),
-     ("meta-stats", "gather metadata statistics", META_STATS),
-     ("print-link-args", "Print the arguments passed to the linker",
-      PRINT_LINK_ARGS),
-     ("gc", "Garbage collect shared data (experimental)", GC),
-     ("print-llvm-passes",
-      "Prints the llvm optimization passes being run",
-      PRINT_LLVM_PASSES),
-     ("ast-json", "Print the AST as JSON and halt", AST_JSON),
-     ("ast-json-noexpand", "Print the pre-expansion AST as JSON and halt", AST_JSON_NOEXPAND),
-     ("ls", "List the symbols defined by a library crate", LS),
-     ("save-analysis", "Write syntax and type analysis information \
-                        in addition to normal output", SAVE_ANALYSIS),
-     ("print-move-fragments", "Print out move-fragment data for every fn",
-      PRINT_MOVE_FRAGMENTS),
-     ("flowgraph-print-loans", "Include loan analysis data in \
-                       --pretty flowgraph output", FLOWGRAPH_PRINT_LOANS),
-     ("flowgraph-print-moves", "Include move analysis data in \
-                       --pretty flowgraph output", FLOWGRAPH_PRINT_MOVES),
-     ("flowgraph-print-assigns", "Include assignment analysis data in \
-                       --pretty flowgraph output", FLOWGRAPH_PRINT_ASSIGNS),
-     ("flowgraph-print-all", "Include all dataflow analysis data in \
-                       --pretty flowgraph output", FLOWGRAPH_PRINT_ALL),
-     ("print-region-graph", "Prints region inference graph. \
-                             Use with RUST_REGION_GRAPH=help for more info",
-      PRINT_REGION_GRAPH),
-     ("parse-only", "Parse only; do not compile, assemble, or link", PARSE_ONLY),
-     ("no-trans", "Run all passes except translation; no output", NO_TRANS),
-     ("no-analysis", "Parse and expand the source, but run no analysis and",
-      NO_ANALYSIS),
-     ("unstable-options", "Adds unstable command line options to rustc interface",
-      UNSTABLE_OPTIONS),
-     ("print-enum-sizes", "Print the size of enums and their variants", PRINT_ENUM_SIZES),
-    ]
 }
 
 #[derive(Clone)]
@@ -352,7 +278,7 @@ impl Passes {
     }
 }
 
-/// Declare a macro that will define all CodegenOptions fields and parsers all
+/// Declare a macro that will define all CodegenOptions/DebuggingOptions fields and parsers all
 /// at once. The goal of this macro is to define an interface that can be
 /// programmatically used by the option parser in order to initialize the struct
 /// without hardcoding field names all over the place.
@@ -362,25 +288,72 @@ impl Passes {
 /// cgsetters module which is a bunch of generated code to parse an option into
 /// its respective field in the struct. There are a few hand-written parsers for
 /// parsing specific types of values in this module.
-macro_rules! cgoptions {
-    ($($opt:ident : $t:ty = ($init:expr, $parse:ident, $desc:expr)),* ,) =>
+macro_rules! options {
+    ($struct_name:ident, $setter_name:ident, $defaultfn:ident,
+     $buildfn:ident, $prefix:expr, $outputname:expr,
+     $stat:ident, $mod_desc:ident, $mod_set:ident,
+     $($opt:ident : $t:ty = ($init:expr, $parse:ident, $desc:expr)),* ,) =>
 (
     #[derive(Clone)]
-    pub struct CodegenOptions { $(pub $opt: $t),* }
+    pub struct $struct_name { $(pub $opt: $t),* }
 
-    pub fn basic_codegen_options() -> CodegenOptions {
-        CodegenOptions { $($opt: $init),* }
+    pub fn $defaultfn() -> $struct_name {
+        $struct_name { $($opt: $init),* }
     }
 
-    pub type CodegenSetter = fn(&mut CodegenOptions, v: Option<&str>) -> bool;
-    pub const CG_OPTIONS: &'static [(&'static str, CodegenSetter,
-                                     Option<&'static str>, &'static str)] =
-        &[ $( (stringify!($opt), cgsetters::$opt, cg_type_descs::$parse, $desc) ),* ];
+    pub fn $buildfn(matches: &getopts::Matches) -> $struct_name
+    {
+        let mut op = $defaultfn();
+        for option in matches.opt_strs($prefix) {
+            let mut iter = option.splitn(1, '=');
+            let key = iter.next().unwrap();
+            let value = iter.next();
+            let option_to_lookup = key.replace("-", "_");
+            let mut found = false;
+            for &(candidate, setter, opt_type_desc, _) in $stat {
+                if option_to_lookup != candidate { continue }
+                if !setter(&mut op, value) {
+                    match (value, opt_type_desc) {
+                        (Some(..), None) => {
+                            early_error(&format!("{} option `{}` takes no \
+                                                 value", $outputname, key))
+                        }
+                        (None, Some(type_desc)) => {
+                            early_error(&format!("{0} option `{1}` requires \
+                                                 {2} ({3} {1}=<value>)",
+                                                $outputname, key,
+                                                type_desc, $prefix))
+                        }
+                        (Some(value), Some(type_desc)) => {
+                            early_error(&format!("incorrect value `{}` for {} \
+                                                 option `{}` - {} was expected",
+                                                 value, $outputname,
+                                                 key, type_desc))
+                        }
+                        (None, None) => unreachable!()
+                    }
+                }
+                found = true;
+                break;
+            }
+            if !found {
+                early_error(&format!("unknown {} option: `{}`",
+                                    $outputname, key));
+            }
+        }
+        return op;
+    }
 
-    #[allow(non_upper_case_globals)]
-    mod cg_type_descs {
+    pub type $setter_name = fn(&mut $struct_name, v: Option<&str>) -> bool;
+    pub const $stat: &'static [(&'static str, $setter_name,
+                                     Option<&'static str>, &'static str)] =
+        &[ $( (stringify!($opt), $mod_set::$opt, $mod_desc::$parse, $desc) ),* ];
+
+    #[allow(non_upper_case_globals, dead_code)]
+    mod $mod_desc {
         pub const parse_bool: Option<&'static str> = None;
-        pub const parse_opt_bool: Option<&'static str> = None;
+        pub const parse_opt_bool: Option<&'static str> =
+            Some("one of: `y`, `yes`, `on`, `n`, `no`, or `off`");
         pub const parse_string: Option<&'static str> = Some("a string");
         pub const parse_opt_string: Option<&'static str> = Some("a string");
         pub const parse_list: Option<&'static str> = Some("a space-separated list of strings");
@@ -392,11 +365,12 @@ macro_rules! cgoptions {
             Some("a number");
     }
 
-    mod cgsetters {
-        use super::{CodegenOptions, Passes, SomePasses, AllPasses};
+    #[allow(dead_code)]
+    mod $mod_set {
+        use super::{$struct_name, Passes, SomePasses, AllPasses};
 
         $(
-            pub fn $opt(cg: &mut CodegenOptions, v: Option<&str>) -> bool {
+            pub fn $opt(cg: &mut $struct_name, v: Option<&str>) -> bool {
                 $parse(&mut cg.$opt, v)
             }
         )*
@@ -410,7 +384,19 @@ macro_rules! cgoptions {
 
         fn parse_opt_bool(slot: &mut Option<bool>, v: Option<&str>) -> bool {
             match v {
-                Some(..) => false,
+                Some(s) => {
+                    match s {
+                        "n" | "no" | "off" => {
+                            *slot = Some(false);
+                        }
+                        "y" | "yes" | "on" => {
+                            *slot = Some(true);
+                        }
+                        _ => { return false; }
+                    }
+
+                    true
+                },
                 None => { *slot = Some(true); true }
             }
         }
@@ -455,7 +441,7 @@ macro_rules! cgoptions {
         }
 
         fn parse_uint(slot: &mut uint, v: Option<&str>) -> bool {
-            match v.and_then(|s| s.parse()) {
+            match v.and_then(|s| s.parse().ok()) {
                 Some(i) => { *slot = i; true },
                 None => false
             }
@@ -463,7 +449,7 @@ macro_rules! cgoptions {
 
         fn parse_opt_uint(slot: &mut Option<uint>, v: Option<&str>) -> bool {
             match v {
-                Some(s) => { *slot = s.parse(); slot.is_some() }
+                Some(s) => { *slot = s.parse().ok(); slot.is_some() }
                 None => { *slot = None; true }
             }
         }
@@ -488,7 +474,9 @@ macro_rules! cgoptions {
     }
 ) }
 
-cgoptions! {
+options! {CodegenOptions, CodegenSetter, basic_codegen_options,
+         build_codegen_options, "C", "codegen",
+         CG_OPTIONS, cg_type_desc, cgsetters,
     ar: Option<String> = (None, parse_opt_string,
         "tool to assemble archives with"),
     linker: Option<String> = (None, parse_opt_string,
@@ -542,47 +530,81 @@ cgoptions! {
          2 = full debug info with variable and type information"),
     opt_level: Option<uint> = (None, parse_opt_uint,
         "Optimize with possible levels 0-3"),
+    debug_assertions: Option<bool> = (None, parse_opt_bool,
+        "explicitly enable the cfg(debug_assertions) directive"),
 }
 
-pub fn build_codegen_options(matches: &getopts::Matches) -> CodegenOptions
-{
-    let mut cg = basic_codegen_options();
-    for option in matches.opt_strs("C").into_iter() {
-        let mut iter = option.splitn(1, '=');
-        let key = iter.next().unwrap();
-        let value = iter.next();
-        let option_to_lookup = key.replace("-", "_");
-        let mut found = false;
-        for &(candidate, setter, opt_type_desc, _) in CG_OPTIONS.iter() {
-            if option_to_lookup != candidate { continue }
-            if !setter(&mut cg, value) {
-                match (value, opt_type_desc) {
-                    (Some(..), None) => {
-                        early_error(format!("codegen option `{}` takes no \
-                                             value", key).index(&FullRange))
-                    }
-                    (None, Some(type_desc)) => {
-                        early_error(format!("codegen option `{0}` requires \
-                                             {1} (-C {0}=<value>)",
-                                            key, type_desc).index(&FullRange))
-                    }
-                    (Some(value), Some(type_desc)) => {
-                        early_error(format!("incorrect value `{}` for codegen \
-                                             option `{}` - {} was expected",
-                                             value, key, type_desc).index(&FullRange))
-                    }
-                    (None, None) => unreachable!()
-                }
-            }
-            found = true;
-            break;
-        }
-        if !found {
-            early_error(format!("unknown codegen option: `{}`",
-                                key).index(&FullRange));
-        }
-    }
-    return cg;
+
+options! {DebuggingOptions, DebuggingSetter, basic_debugging_options,
+         build_debugging_options, "Z", "debugging",
+         DB_OPTIONS, db_type_desc, dbsetters,
+    verbose: bool = (false, parse_bool,
+        "in general, enable more debug printouts"),
+    time_passes: bool = (false, parse_bool,
+        "measure time of each rustc pass"),
+    count_llvm_insns: bool = (false, parse_bool,
+        "count where LLVM instrs originate"),
+    time_llvm_passes: bool = (false, parse_bool,
+        "measure time of each LLVM pass"),
+    trans_stats: bool = (false, parse_bool,
+        "gather trans statistics"),
+    asm_comments: bool = (false, parse_bool,
+        "generate comments into the assembly (may change behavior)"),
+    no_verify: bool = (false, parse_bool,
+        "skip LLVM verification"),
+    borrowck_stats: bool = (false, parse_bool,
+        "gather borrowck statistics"),
+    no_landing_pads: bool = (false, parse_bool,
+        "omit landing pads for unwinding"),
+    debug_llvm: bool = (false, parse_bool,
+        "enable debug output from LLVM"),
+    count_type_sizes: bool = (false, parse_bool,
+        "count the sizes of aggregate types"),
+    meta_stats: bool = (false, parse_bool,
+        "gather metadata statistics"),
+    print_link_args: bool = (false, parse_bool,
+        "Print the arguments passed to the linker"),
+    gc: bool = (false, parse_bool,
+        "Garbage collect shared data (experimental)"),
+    print_llvm_passes: bool = (false, parse_bool,
+        "Prints the llvm optimization passes being run"),
+    ast_json: bool = (false, parse_bool,
+        "Print the AST as JSON and halt"),
+    ast_json_noexpand: bool = (false, parse_bool,
+        "Print the pre-expansion AST as JSON and halt"),
+    ls: bool = (false, parse_bool,
+        "List the symbols defined by a library crate"),
+    save_analysis: bool = (false, parse_bool,
+        "Write syntax and type analysis information in addition to normal output"),
+    print_move_fragments: bool = (false, parse_bool,
+        "Print out move-fragment data for every fn"),
+    flowgraph_print_loans: bool = (false, parse_bool,
+        "Include loan analysis data in --pretty flowgraph output"),
+    flowgraph_print_moves: bool = (false, parse_bool,
+        "Include move analysis data in --pretty flowgraph output"),
+    flowgraph_print_assigns: bool = (false, parse_bool,
+        "Include assignment analysis data in --pretty flowgraph output"),
+    flowgraph_print_all: bool = (false, parse_bool,
+        "Include all dataflow analysis data in --pretty flowgraph output"),
+    print_region_graph: bool = (false, parse_bool,
+         "Prints region inference graph. \
+          Use with RUST_REGION_GRAPH=help for more info"),
+    parse_only: bool = (false, parse_bool,
+          "Parse only; do not compile, assemble, or link"),
+    no_trans: bool = (false, parse_bool,
+          "Run all passes except translation; no output"),
+    treat_err_as_bug: bool = (false, parse_bool,
+          "Treat all errors that occur as bugs"),
+    no_analysis: bool = (false, parse_bool,
+          "Parse and expand the source, but run no analysis"),
+    extra_plugins: Vec<String> = (Vec::new(), parse_list,
+        "load extra plugins"),
+    unstable_options: bool = (false, parse_bool,
+          "Adds unstable command line options to rustc interface"),
+    print_enum_sizes: bool = (false, parse_bool,
+          "Print the size of enums and their variants"),
+    force_overflow_checks: Option<bool> = (None, parse_opt_bool,
+          "Force overflow checks on or off"),
 }
 
 pub fn default_lib_output() -> CrateType {
@@ -592,10 +614,10 @@ pub fn default_lib_output() -> CrateType {
 pub fn default_configuration(sess: &Session) -> ast::CrateConfig {
     use syntax::parse::token::intern_and_get_ident as intern;
 
-    let end = sess.target.target.target_endian.index(&FullRange);
-    let arch = sess.target.target.arch.index(&FullRange);
-    let wordsz = sess.target.target.target_word_size.index(&FullRange);
-    let os = sess.target.target.target_os.index(&FullRange);
+    let end = &sess.target.target.target_endian;
+    let arch = &sess.target.target.arch;
+    let wordsz = &sess.target.target.target_pointer_width;
+    let os = &sess.target.target.target_os;
 
     let fam = match sess.target.target.options.is_like_windows {
         true  => InternedString::new("windows"),
@@ -603,15 +625,19 @@ pub fn default_configuration(sess: &Session) -> ast::CrateConfig {
     };
 
     let mk = attr::mk_name_value_item_str;
-    return vec!(// Target bindings.
+    let mut ret = vec![ // Target bindings.
          attr::mk_word_item(fam.clone()),
          mk(InternedString::new("target_os"), intern(os)),
          mk(InternedString::new("target_family"), fam),
          mk(InternedString::new("target_arch"), intern(arch)),
          mk(InternedString::new("target_endian"), intern(end)),
-         mk(InternedString::new("target_word_size"),
+         mk(InternedString::new("target_pointer_width"),
             intern(wordsz))
-    );
+    ];
+    if sess.opts.debug_assertions {
+        ret.push(attr::mk_word_item(InternedString::new("debug_assertions")));
+    }
+    return ret;
 }
 
 pub fn append_configuration(cfg: &mut ast::CrateConfig,
@@ -631,23 +657,23 @@ pub fn build_configuration(sess: &Session) -> ast::CrateConfig {
         append_configuration(&mut user_cfg, InternedString::new("test"))
     }
     let mut v = user_cfg.into_iter().collect::<Vec<_>>();
-    v.push_all(default_cfg.index(&FullRange));
+    v.push_all(&default_cfg[..]);
     v
 }
 
 pub fn build_target_config(opts: &Options, sp: &SpanHandler) -> Config {
-    let target = match Target::search(opts.target_triple.index(&FullRange)) {
+    let target = match Target::search(&opts.target_triple) {
         Ok(t) => t,
         Err(e) => {
-            sp.handler().fatal((format!("Error loading target specification: {}", e)).as_slice());
+            sp.handler().fatal(&format!("Error loading target specification: {}", e));
     }
     };
 
-    let (int_type, uint_type) = match target.target_word_size.index(&FullRange) {
+    let (int_type, uint_type) = match &target.target_pointer_width[..] {
         "32" => (ast::TyI32, ast::TyU32),
         "64" => (ast::TyI64, ast::TyU64),
-        w    => sp.handler().fatal((format!("target specification was invalid: unrecognized \
-                                            target-word-size {}", w)).index(&FullRange))
+        w    => sp.handler().fatal(&format!("target specification was invalid: unrecognized \
+                                             target-pointer-width {}", w))
     };
 
     Config {
@@ -673,7 +699,7 @@ pub fn optgroups() -> Vec<getopts::OptGroup> {
         .collect()
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, Show)]
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum OptionStability { Stable, Unstable }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -739,7 +765,8 @@ pub fn rustc_short_optgroups() -> Vec<RustcOptGroup> {
     vec![
         opt::flag("h", "help", "Display this message"),
         opt::multi("", "cfg", "Configure the compilation environment", "SPEC"),
-        opt::multi("L", "",   "Add a directory to the library search path", "PATH"),
+        opt::multi("L", "",   "Add a directory to the library search path",
+                   "[KIND=]PATH"),
         opt::multi("l", "",   "Link the generated crate(s) to the specified native
                              library NAME. The optional KIND can be one of,
                              static, dylib, or framework. If omitted, dylib is
@@ -787,7 +814,6 @@ pub fn rustc_optgroups() -> Vec<RustcOptGroup> {
         opt::multi("", "extern", "Specify where an external rust library is \
                                 located",
                  "NAME=PATH"),
-        opt::opt("", "opt-level", "Optimize with possible levels 0-3", "LEVEL"),
         opt::opt("", "sysroot", "Override the system root", "PATH"),
         opt::multi("Z", "", "Set internal debugging options", "FLAG"),
         opt::opt("", "color", "Configure coloring of output:
@@ -795,22 +821,7 @@ pub fn rustc_optgroups() -> Vec<RustcOptGroup> {
             always = always colorize output;
             never  = never colorize output", "auto|always|never"),
 
-        // DEPRECATED
-        opt::flag("", "print-crate-name", "Output the crate name and exit"),
-        opt::flag("", "print-file-name", "Output the file(s) that would be \
-                                        written if compilation \
-                                        continued and exit"),
-        opt::opt("",  "debuginfo",  "Emit DWARF debug info to the objects created:
-             0 = no debug info,
-             1 = line-tables only (for stacktraces and breakpoints),
-             2 = full debug info with variable and type information \
-                    (same as -g)", "LEVEL"),
-        opt::flag("", "no-trans", "Run all passes except translation; no output"),
-        opt::flag("", "no-analysis", "Parse and expand the source, but run no \
-                                    analysis and produce no output"),
-        opt::flag("", "parse-only", "Parse only; do not compile, assemble, \
-                                   or link"),
-        opt::flagopt("", "pretty",
+        opt::flagopt_u("", "pretty",
                    "Pretty-print the input instead of compiling;
                    valid types are: `normal` (un-annotated source),
                    `expanded` (crates expanded),
@@ -824,9 +835,6 @@ pub fn rustc_optgroups() -> Vec<RustcOptGroup> {
                       `everybody_loops` (all function bodies replaced with `loop {}`).",
                      "TYPE"),
         opt::opt_u("", "show-span", "Show spans for compiler debugging", "expr|pat|ty"),
-        opt::flagopt("", "dep-info",
-                 "Output dependency info to <filename> after compiling, \
-                  in a format suitable for use by Makefiles", "FILENAME"),
     ]);
     opts
 }
@@ -842,16 +850,15 @@ pub fn parse_cfgspecs(cfgspecs: Vec<String> ) -> ast::CrateConfig {
 }
 
 pub fn build_session_options(matches: &getopts::Matches) -> Options {
-
     let unparsed_crate_types = matches.opt_strs("crate-type");
     let crate_types = parse_crate_types_from_list(unparsed_crate_types)
-        .unwrap_or_else(|e| early_error(e.index(&FullRange)));
+        .unwrap_or_else(|e| early_error(&e[..]));
 
     let mut lint_opts = vec!();
     let mut describe_lints = false;
 
-    for &level in [lint::Allow, lint::Warn, lint::Deny, lint::Forbid].iter() {
-        for lint_name in matches.opt_strs(level.as_str()).into_iter() {
+    for &level in &[lint::Allow, lint::Warn, lint::Deny, lint::Forbid] {
+        for lint_name in matches.opt_strs(level.as_str()) {
             if lint_name == "help" {
                 describe_lints = true;
             } else {
@@ -860,56 +867,23 @@ pub fn build_session_options(matches: &getopts::Matches) -> Options {
         }
     }
 
-    let mut debugging_opts = 0;
-    let debug_flags = matches.opt_strs("Z");
-    let debug_map = debugging_opts_map();
-    for debug_flag in debug_flags.iter() {
-        let mut this_bit = 0;
-        for &(name, _, bit) in debug_map.iter() {
-            if name == *debug_flag {
-                this_bit = bit;
-                break;
-            }
-        }
-        if this_bit == 0 {
-            early_error(format!("unknown debug flag: {}",
-                                *debug_flag).index(&FullRange))
-        }
-        debugging_opts |= this_bit;
-    }
+    let debugging_opts = build_debugging_options(matches);
 
-    let parse_only = if matches.opt_present("parse-only") {
-        // FIXME(acrichto) remove this eventually
-        early_warn("--parse-only is deprecated in favor of -Z parse-only");
-        true
-    } else {
-        debugging_opts & PARSE_ONLY != 0
-    };
-    let no_trans = if matches.opt_present("no-trans") {
-        // FIXME(acrichto) remove this eventually
-        early_warn("--no-trans is deprecated in favor of -Z no-trans");
-        true
-    } else {
-        debugging_opts & NO_TRANS != 0
-    };
-    let no_analysis = if matches.opt_present("no-analysis") {
-        // FIXME(acrichto) remove this eventually
-        early_warn("--no-analysis is deprecated in favor of -Z no-analysis");
-        true
-    } else {
-        debugging_opts & NO_ANALYSIS != 0
-    };
+    let parse_only = debugging_opts.parse_only;
+    let no_trans = debugging_opts.no_trans;
+    let treat_err_as_bug = debugging_opts.treat_err_as_bug;
+    let no_analysis = debugging_opts.no_analysis;
 
-    if debugging_opts & DEBUG_LLVM != 0 {
+    if debugging_opts.debug_llvm {
         unsafe { llvm::LLVMSetDebug(1); }
     }
 
     let mut output_types = Vec::new();
-    if !parse_only && !no_trans {
+    if !debugging_opts.parse_only && !no_trans {
         let unparsed_output_types = matches.opt_strs("emit");
-        for unparsed_output_type in unparsed_output_types.iter() {
+        for unparsed_output_type in &unparsed_output_types {
             for part in unparsed_output_type.split(',') {
-                let output_type = match part.as_slice() {
+                let output_type = match part {
                     "asm" => OutputTypeAssembly,
                     "llvm-ir" => OutputTypeLlvmAssembly,
                     "llvm-bc" => OutputTypeBitcode,
@@ -917,8 +891,8 @@ pub fn build_session_options(matches: &getopts::Matches) -> Options {
                     "link" => OutputTypeExe,
                     "dep-info" => OutputTypeDepInfo,
                     _ => {
-                        early_error(format!("unknown emission type: `{}`",
-                                            part).index(&FullRange))
+                        early_error(&format!("unknown emission type: `{}`",
+                                            part))
                     }
                 };
                 output_types.push(output_type)
@@ -933,33 +907,15 @@ pub fn build_session_options(matches: &getopts::Matches) -> Options {
 
     let cg = build_codegen_options(matches);
 
-    let sysroot_opt = matches.opt_str("sysroot").map(|m| Path::new(m));
+    let sysroot_opt = matches.opt_str("sysroot").map(|m| PathBuf::new(&m));
     let target = matches.opt_str("target").unwrap_or(
         host_triple().to_string());
     let opt_level = {
         if matches.opt_present("O") {
-            if matches.opt_present("opt-level") {
-                early_error("-O and --opt-level both provided");
-            }
             if cg.opt_level.is_some() {
                 early_error("-O and -C opt-level both provided");
             }
             Default
-        } else if matches.opt_present("opt-level") {
-            // FIXME(acrichto) remove this eventually
-            early_warn("--opt-level=N is deprecated in favor of -C opt-level=N");
-            match matches.opt_str("opt-level").as_ref().map(|s| s.as_slice()) {
-                None      |
-                Some("0") => No,
-                Some("1") => Less,
-                Some("2") => Default,
-                Some("3") => Aggressive,
-                Some(arg) => {
-                    early_error(format!("optimization level needs to be \
-                                         between 0-3 (instead was `{}`)",
-                                        arg).index(&FullRange));
-                }
-            }
         } else {
             match cg.opt_level {
                 None => No,
@@ -968,52 +924,36 @@ pub fn build_session_options(matches: &getopts::Matches) -> Options {
                 Some(2) => Default,
                 Some(3) => Aggressive,
                 Some(arg) => {
-                    early_error(format!("optimization level needs to be \
-                                         between 0-3 (instead was `{}`)",
-                                        arg).as_slice());
+                    early_error(&format!("optimization level needs to be \
+                                          between 0-3 (instead was `{}`)",
+                                         arg));
                 }
             }
         }
     };
-    let gc = debugging_opts & GC != 0;
+    let debug_assertions = cg.debug_assertions.unwrap_or(opt_level == No);
+    let gc = debugging_opts.gc;
     let debuginfo = if matches.opt_present("g") {
-        if matches.opt_present("debuginfo") {
-            early_error("-g and --debuginfo both provided");
-        }
         if cg.debuginfo.is_some() {
             early_error("-g and -C debuginfo both provided");
         }
         FullDebugInfo
-    } else if matches.opt_present("debuginfo") {
-        // FIXME(acrichto) remove this eventually
-        early_warn("--debuginfo=N is deprecated in favor of -C debuginfo=N");
-        match matches.opt_str("debuginfo").as_ref().map(|s| s.as_slice()) {
-            Some("0") => NoDebugInfo,
-            Some("1") => LimitedDebugInfo,
-            None      |
-            Some("2") => FullDebugInfo,
-            Some(arg) => {
-                early_error(format!("debug info level needs to be between \
-                                     0-2 (instead was `{}`)",
-                                    arg).index(&FullRange));
-            }
-        }
     } else {
         match cg.debuginfo {
             None | Some(0) => NoDebugInfo,
             Some(1) => LimitedDebugInfo,
             Some(2) => FullDebugInfo,
             Some(arg) => {
-                early_error(format!("debug info level needs to be between \
-                                     0-2 (instead was `{}`)",
-                                    arg).as_slice());
+                early_error(&format!("debug info level needs to be between \
+                                      0-2 (instead was `{}`)",
+                                     arg));
             }
         }
     };
 
     let mut search_paths = SearchPaths::new();
-    for s in matches.opt_strs("L").iter() {
-        search_paths.add_path(s.index(&FullRange));
+    for s in &matches.opt_strs("L") {
+        search_paths.add_path(&s[..]);
     }
 
     let libs = matches.opt_strs("l").into_iter().map(|s| {
@@ -1025,9 +965,9 @@ pub fn build_session_options(matches: &getopts::Matches) -> Options {
                 "framework" => cstore::NativeFramework,
                 "static" => cstore::NativeStatic,
                 s => {
-                    early_error(format!("unknown library kind `{}`, expected \
-                                         one of dylib, framework, or static",
-                                        s).as_slice());
+                    early_error(&format!("unknown library kind `{}`, expected \
+                                          one of dylib, framework, or static",
+                                         s));
                 }
             };
             return (name.to_string(), kind)
@@ -1043,9 +983,9 @@ pub fn build_session_options(matches: &getopts::Matches) -> Options {
             (Some(name), "framework") => (name, cstore::NativeFramework),
             (Some(name), "static") => (name, cstore::NativeStatic),
             (_, s) => {
-                early_error(format!("unknown library kind `{}`, expected \
+                early_error(&format!("unknown library kind `{}`, expected \
                                      one of dylib, framework, or static",
-                                    s).index(&FullRange));
+                                    s));
             }
         };
         (name.to_string(), kind)
@@ -1053,43 +993,25 @@ pub fn build_session_options(matches: &getopts::Matches) -> Options {
 
     let cfg = parse_cfgspecs(matches.opt_strs("cfg"));
     let test = matches.opt_present("test");
-    let write_dependency_info = if matches.opt_present("dep-info") {
-        // FIXME(acrichto) remove this eventually
-        early_warn("--dep-info has been deprecated in favor of --emit");
-        (true, matches.opt_str("dep-info").map(|p| Path::new(p)))
-    } else {
-        (output_types.contains(&OutputTypeDepInfo), None)
-    };
+    let write_dependency_info = (output_types.contains(&OutputTypeDepInfo), None);
 
-    let mut prints = matches.opt_strs("print").into_iter().map(|s| {
-        match s.as_slice() {
+    let prints = matches.opt_strs("print").into_iter().map(|s| {
+        match &*s {
             "crate-name" => PrintRequest::CrateName,
             "file-names" => PrintRequest::FileNames,
             "sysroot" => PrintRequest::Sysroot,
             req => {
-                early_error(format!("unknown print request `{}`", req).as_slice())
+                early_error(&format!("unknown print request `{}`", req))
             }
         }
     }).collect::<Vec<_>>();
-    if matches.opt_present("print-crate-name") {
-        // FIXME(acrichto) remove this eventually
-        early_warn("--print-crate-name has been deprecated in favor of \
-                    --print crate-name");
-        prints.push(PrintRequest::CrateName);
-    }
-    if matches.opt_present("print-file-name") {
-        // FIXME(acrichto) remove this eventually
-        early_warn("--print-file-name has been deprecated in favor of \
-                    --print file-names");
-        prints.push(PrintRequest::FileNames);
-    }
 
     if !cg.remark.is_empty() && debuginfo == NoDebugInfo {
         early_warn("-C remark will not show source locations without \
                     --debuginfo");
     }
 
-    let color = match matches.opt_str("color").as_ref().map(|s| s.index(&FullRange)) {
+    let color = match matches.opt_str("color").as_ref().map(|s| &s[..]) {
         Some("auto")   => Auto,
         Some("always") => Always,
         Some("never")  => Never,
@@ -1097,14 +1019,14 @@ pub fn build_session_options(matches: &getopts::Matches) -> Options {
         None => Auto,
 
         Some(arg) => {
-            early_error(format!("argument for --color must be auto, always \
+            early_error(&format!("argument for --color must be auto, always \
                                  or never (instead was `{}`)",
-                                arg).index(&FullRange))
+                                arg))
         }
     };
 
     let mut externs = HashMap::new();
-    for arg in matches.opt_strs("extern").iter() {
+    for arg in &matches.opt_strs("extern") {
         let mut parts = arg.splitn(1, '=');
         let name = match parts.next() {
             Some(s) => s,
@@ -1138,6 +1060,7 @@ pub fn build_session_options(matches: &getopts::Matches) -> Options {
         test: test,
         parse_only: parse_only,
         no_trans: no_trans,
+        treat_err_as_bug: treat_err_as_bug,
         no_analysis: no_analysis,
         debugging_opts: debugging_opts,
         write_dependency_info: write_dependency_info,
@@ -1149,13 +1072,30 @@ pub fn build_session_options(matches: &getopts::Matches) -> Options {
         crate_name: crate_name,
         alt_std_name: None,
         libs: libs,
+        unstable_features: get_unstable_features_setting(),
+        debug_assertions: debug_assertions,
+    }
+}
+
+pub fn get_unstable_features_setting() -> UnstableFeatures {
+    // Whether this is a feature-staged build, i.e. on the beta or stable channel
+    let disable_unstable_features = option_env!("CFG_DISABLE_UNSTABLE_FEATURES").is_some();
+    // The secret key needed to get through the rustc build itself by
+    // subverting the unstable features lints
+    let bootstrap_secret_key = option_env!("CFG_BOOTSTRAP_KEY");
+    // The matching key to the above, only known by the build system
+    let bootstrap_provided_key = env::var("RUSTC_BOOTSTRAP_KEY").ok();
+    match (disable_unstable_features, bootstrap_secret_key, bootstrap_provided_key) {
+        (_, Some(ref s), Some(ref p)) if s == p => UnstableFeatures::Cheat,
+        (true, _, _) => UnstableFeatures::Disallow,
+        (false, _, _) => UnstableFeatures::Default
     }
 }
 
 pub fn parse_crate_types_from_list(list_list: Vec<String>) -> Result<Vec<CrateType>, String> {
 
     let mut crate_types: Vec<CrateType> = Vec::new();
-    for unparsed_crate_type in list_list.iter() {
+    for unparsed_crate_type in &list_list {
         for part in unparsed_crate_type.split(',') {
             let new_part = match part {
                 "lib"       => default_lib_output(),
@@ -1168,14 +1108,16 @@ pub fn parse_crate_types_from_list(list_list: Vec<String>) -> Result<Vec<CrateTy
                                        part));
                 }
             };
-            crate_types.push(new_part)
+            if !crate_types.contains(&new_part) {
+                crate_types.push(new_part)
+            }
         }
     }
 
     return Ok(crate_types);
 }
 
-impl fmt::Show for CrateType {
+impl fmt::Display for CrateType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
             CrateTypeExecutable => "bin".fmt(f),
@@ -1201,7 +1143,7 @@ mod test {
     #[test]
     fn test_switch_implies_cfg_test() {
         let matches =
-            &match getopts(&["--test".to_string()], optgroups().index(&FullRange)) {
+            &match getopts(&["--test".to_string()], &optgroups()) {
               Ok(m) => m,
               Err(f) => panic!("test_switch_implies_cfg_test: {}", f)
             };
@@ -1209,7 +1151,7 @@ mod test {
         let sessopts = build_session_options(matches);
         let sess = build_session(sessopts, None, registry);
         let cfg = build_configuration(&sess);
-        assert!((attr::contains_name(cfg.index(&FullRange), "test")));
+        assert!((attr::contains_name(&cfg[..], "test")));
     }
 
     // When the user supplies --test and --cfg test, don't implicitly add
@@ -1218,7 +1160,7 @@ mod test {
     fn test_switch_implies_cfg_test_unless_cfg_test() {
         let matches =
             &match getopts(&["--test".to_string(), "--cfg=test".to_string()],
-                           optgroups().index(&FullRange)) {
+                           &optgroups()) {
               Ok(m) => m,
               Err(f) => {
                 panic!("test_switch_implies_cfg_test_unless_cfg_test: {}", f)
@@ -1238,7 +1180,7 @@ mod test {
         {
             let matches = getopts(&[
                 "-Awarnings".to_string()
-            ], optgroups().index(&FullRange)).unwrap();
+            ], &optgroups()).unwrap();
             let registry = diagnostics::registry::Registry::new(&[]);
             let sessopts = build_session_options(&matches);
             let sess = build_session(sessopts, None, registry);
@@ -1249,7 +1191,7 @@ mod test {
             let matches = getopts(&[
                 "-Awarnings".to_string(),
                 "-Dwarnings".to_string()
-            ], optgroups().index(&FullRange)).unwrap();
+            ], &optgroups()).unwrap();
             let registry = diagnostics::registry::Registry::new(&[]);
             let sessopts = build_session_options(&matches);
             let sess = build_session(sessopts, None, registry);
@@ -1259,7 +1201,7 @@ mod test {
         {
             let matches = getopts(&[
                 "-Adead_code".to_string()
-            ], optgroups().index(&FullRange)).unwrap();
+            ], &optgroups()).unwrap();
             let registry = diagnostics::registry::Registry::new(&[]);
             let sessopts = build_session_options(&matches);
             let sess = build_session(sessopts, None, registry);

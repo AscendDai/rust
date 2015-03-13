@@ -14,6 +14,9 @@
 // boxes. Make sure that we don't free the box as we match the
 // pattern.
 
+#![allow(unknown_features)]
+#![feature(box_patterns)]
+#![feature(box_syntax)]
 
 fn getaddr(box ref x: Box<uint>) -> *const uint {
     let addr: *const uint = &*x;
@@ -25,7 +28,7 @@ fn checkval(box ref x: Box<uint>) -> uint {
 }
 
 pub fn main() {
-    let obj = box 1;
+    let obj: Box<_> = box 1;
     let objptr: *const uint = &*obj;
     let xptr = getaddr(obj);
     assert_eq!(objptr, xptr);

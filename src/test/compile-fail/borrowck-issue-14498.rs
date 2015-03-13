@@ -11,12 +11,14 @@
 // This tests that we can't modify Box<&mut T> contents while they
 // are borrowed.
 
-struct A { a: int }
-struct B<'a> { a: Box<&'a mut int> }
+#![feature(box_syntax)]
+
+struct A { a: isize }
+struct B<'a> { a: Box<&'a mut isize> }
 
 fn borrow_in_var_from_var() {
-    let mut x: int = 1;
-    let y = box &mut x;
+    let mut x: isize = 1;
+    let y: Box<_> = box &mut x;
     let p = &y;
     let q = &***p;
     **y = 2; //~ ERROR cannot assign to `**y` because it is borrowed
@@ -26,7 +28,7 @@ fn borrow_in_var_from_var() {
 
 fn borrow_in_var_from_field() {
     let mut x = A { a: 1 };
-    let y = box &mut x.a;
+    let y: Box<_> = box &mut x.a;
     let p = &y;
     let q = &***p;
     **y = 2; //~ ERROR cannot assign to `**y` because it is borrowed
@@ -35,7 +37,7 @@ fn borrow_in_var_from_field() {
 }
 
 fn borrow_in_field_from_var() {
-    let mut x: int = 1;
+    let mut x: isize = 1;
     let y = B { a: box &mut x };
     let p = &y.a;
     let q = &***p;

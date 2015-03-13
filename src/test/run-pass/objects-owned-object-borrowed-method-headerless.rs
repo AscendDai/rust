@@ -12,6 +12,9 @@
 // closed over do not contain managed values, and thus the boxes do
 // not have headers.
 
+#![allow(unknown_features)]
+#![feature(box_syntax)]
+
 
 trait FooTrait {
     fn foo(&self) -> uint;
@@ -34,7 +37,7 @@ pub fn main() {
         box BarStruct{ x: 2 } as Box<FooTrait>
     );
 
-    for i in range(0u, foos.len()) {
+    for i in 0..foos.len() {
         assert_eq!(i, foos[i].foo());
     }
 }

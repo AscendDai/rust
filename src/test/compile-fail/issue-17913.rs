@@ -8,18 +8,21 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+
 // error-pattern: too big for the current architecture
 
-#[cfg(target_word_size = "64")]
+#![feature(box_syntax)]
+
+#[cfg(target_pointer_width = "64")]
 fn main() {
-    let n = 0u;
-    let a = box [&n; 0xF000000000000000u];
-    println!("{}", a[0xFFFFFFu]);
+    let n = 0_usize;
+    let a: Box<_> = box [&n; 0xF000000000000000_usize];
+    println!("{}", a[0xFFFFFF_usize]);
 }
 
-#[cfg(target_word_size = "32")]
+#[cfg(target_pointer_width = "32")]
 fn main() {
-    let n = 0u;
-    let a = box [&n; 0xFFFFFFFFu];
-    println!("{}", a[0xFFFFFFu]);
+    let n = 0_usize;
+    let a: Box<_> = box [&n; 0xFFFFFFFF_usize];
+    println!("{}", a[0xFFFFFF_usize]);
 }

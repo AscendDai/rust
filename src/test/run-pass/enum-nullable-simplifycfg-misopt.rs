@@ -8,6 +8,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![allow(unknown_features)]
+#![feature(box_syntax)]
 
 /*!
  * This is a regression test for a bug in LLVM, fixed in upstream r179587,
@@ -17,8 +19,8 @@
 
 enum List<X> { Nil, Cons(X, Box<List<X>>) }
 pub fn main() {
-    match List::Cons(10i, box List::Nil) {
-        List::Cons(10i, _) => {}
+    match List::Cons(10, box List::Nil) {
+        List::Cons(10, _) => {}
         List::Nil => {}
         _ => panic!()
     }

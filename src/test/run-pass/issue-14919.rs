@@ -29,9 +29,10 @@ trait IntoMatcher<'a, T> {
 
 impl<'a, 'b, F> IntoMatcher<'a, CharPredMatcher<'a, 'b>> for F where F: FnMut(char) -> bool + 'b {
     fn into_matcher(self, s: &'a str) -> CharPredMatcher<'a, 'b> {
+        // FIXME (#22405): Replace `Box::new` with `box` here when/if possible.
         CharPredMatcher {
             str: s,
-            pred: box self,
+            pred: Box::new(self),
         }
     }
 }
@@ -55,6 +56,6 @@ fn match_indices<'a, M, T: IntoMatcher<'a, M>>(s: &'a str, from: T) -> MatchIndi
 
 fn main() {
     let s = "abcbdef";
-    match_indices(s, |&mut: c: char| c == 'b')
+    match_indices(s, |c: char| c == 'b')
         .collect::<Vec<(uint, uint)>>();
 }

@@ -8,10 +8,12 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-struct MyStruct { field: uint }
+struct MyStruct { field: usize }
 const STRUCT: MyStruct = MyStruct { field: 42 };
 
 fn main() {
-    let a: [int; STRUCT.nonexistent_field];
-    //~^ ERROR expected constant expr for array length: nonexistent struct field
+    let a: [isize; STRUCT.nonexistent_field];
+    //~^ ERROR array length constant evaluation error: nonexistent struct field
+    //~| ERROR attempted access of field `nonexistent_field`
+    //~| ERROR attempted access of field `nonexistent_field`
 }

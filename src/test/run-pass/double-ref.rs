@@ -9,33 +9,33 @@
 // except according to those terms.
 
 fn check_expr() {
-    let _:         & uint =     &1u;
-    let _:       & & uint =    &&1u;
-    let _:     & & & uint =   &&&1u;
-    let _:     & & & uint =  & &&1u;
-    let _:   & & & & uint =  &&&&1u;
-    let _:   & & & & uint = & &&&1u;
-    let _: & & & & & uint = &&&&&1u;
+    let _:         & uint =     &1;
+    let _:       & & uint =    &&1;
+    let _:     & & & uint =   &&&1;
+    let _:     & & & uint =  & &&1;
+    let _:   & & & & uint =  &&&&1;
+    let _:   & & & & uint = & &&&1;
+    let _: & & & & & uint = &&&&&1;
 }
 
 fn check_ty() {
-    let _:     &uint =         & 1u;
-    let _:    &&uint =       & & 1u;
-    let _:   &&&uint =     & & & 1u;
-    let _:  & &&uint =     & & & 1u;
-    let _:  &&&&uint =   & & & & 1u;
-    let _: & &&&uint =   & & & & 1u;
-    let _: &&&&&uint = & & & & & 1u;
+    let _:     &uint =         & 1;
+    let _:    &&uint =       & & 1;
+    let _:   &&&uint =     & & & 1;
+    let _:  & &&uint =     & & & 1;
+    let _:  &&&&uint =   & & & & 1;
+    let _: & &&&uint =   & & & & 1;
+    let _: &&&&&uint = & & & & & 1;
 }
 
 fn check_pat() {
-    let     &_ =         & 1u;
-    let    &&_ =       & & 1u;
-    let   &&&_ =     & & & 1u;
-    let  & &&_ =     & & & 1u;
-    let  &&&&_ =   & & & & 1u;
-    let & &&&_ =   & & & & 1u;
-    let &&&&&_ = & & & & & 1u;
+    let     &_ =         & 1_usize;
+    let    &&_ =       & & 1_usize;
+    let   &&&_ =     & & & 1_usize;
+    let  & &&_ =     & & & 1_usize;
+    let  &&&&_ =   & & & & 1_usize;
+    let & &&&_ =   & & & & 1_usize;
+    let &&&&&_ = & & & & & 1_usize;
 }
 
 pub fn main() {}

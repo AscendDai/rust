@@ -16,7 +16,7 @@ pub trait Foo {
 }
 
 #[derive(PartialEq)]
-struct Bar;
+pub struct Bar;
 
 impl Foo for int {
     type A = uint;
@@ -37,7 +37,7 @@ fn foo_uint<I: Foo<A=uint>>(x: I) -> uint {
 }
 
 pub fn main() {
-    let a = 42i;
+    let a = 42;
     foo_uint(a);
 
     let a = 'a';

@@ -9,5 +9,6 @@
 // except according to those terms.
 
 fn main() {
+    let _ = std::old_io::stdin();
     let _ = std::io::stdin();
 }

@@ -11,6 +11,7 @@
 #![allow(unused_variables)]
 #![allow(non_camel_case_types)]
 #![deny(dead_code)]
+#![feature(libc)]
 
 #![crate_type="lib"]
 
@@ -79,12 +80,12 @@ mod inner {
         fn f(&self) { f(); }
     }
 
-    impl Trait for int {}
+    impl Trait for isize {}
 
     fn f() {}
 }
 
 pub fn foo() {
-    let a = &1i as &inner::Trait;
+    let a = &1 as &inner::Trait;
     a.f();
 }

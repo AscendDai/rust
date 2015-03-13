@@ -8,7 +8,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-// ignore-android: FIXME(#10381)
 // min-lldb-version: 310
 
 // compile-flags:-g
@@ -41,7 +40,7 @@
 // lldb-check:[...]$2 = 5
 
 #![allow(unused_variables)]
-#![feature(unboxed_closures)]
+#![feature(unboxed_closures, box_syntax)]
 #![omit_gdb_pretty_printer_section]
 
 struct Struct {
@@ -59,21 +58,21 @@ fn main() {
         c: 4
     };
 
-    let owned = box 5;
+    let owned: Box<_> = box 5;
 
-    let closure = move |:| {
+    let closure = move || {
         zzz(); // #break
         do_something(&constant, &a_struct.a, &*owned);
     };
 
     closure();
 
-    let constant2 = 6u;
+    let constant2 = 6_usize;
 
     // The `self` argument of the following closure should be passed by value
     // to FnOnce::call_once(self, args), which gets translated a bit differently
     // than the regular case. Let's make sure this is supported too.
-    let immedate_env = move |:| {
+    let immedate_env = move || {
         zzz(); // #break
         return constant2;
     };

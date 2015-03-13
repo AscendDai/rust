@@ -9,6 +9,10 @@
 // except according to those terms.
 
 // aux-build:cci_class_cast.rs
+
+#![allow(unknown_features)]
+#![feature(box_syntax)]
+
 extern crate cci_class_cast;
 
 use std::string::ToString;
@@ -21,6 +25,6 @@ fn print_out(thing: Box<ToString>, expected: String) {
 }
 
 pub fn main() {
-  let nyan: Box<ToString> = box cat(0u, 2, "nyan".to_string()) as Box<ToString>;
+  let nyan: Box<ToString> = box cat(0, 2, "nyan".to_string()) as Box<ToString>;
   print_out(nyan, "nyan".to_string());
 }

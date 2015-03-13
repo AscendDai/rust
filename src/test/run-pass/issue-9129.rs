@@ -10,6 +10,8 @@
 
 // ignore-pretty
 
+#![allow(unknown_features)]
+#![feature(box_syntax)]
 
 pub trait bomb { fn boom(&self, Ident); }
 pub struct S;
@@ -27,7 +29,7 @@ fn Ident_new() -> Ident {
 
 pub fn light_fuse(fld: Box<bomb>) {
     int3!();
-    let f = |&:| {
+    let f = || {
         int3!();
         fld.boom(Ident_new()); // *** 1
     };

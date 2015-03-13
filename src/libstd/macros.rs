@@ -14,7 +14,7 @@
 //! library. Each macro is available for use when linking against the standard
 //! library.
 
-#![experimental]
+#![unstable(feature = "std_misc")]
 
 /// The entry point for panic of Rust tasks.
 ///
@@ -26,262 +26,76 @@
 /// The multi-argument form of this macro panics with a string and has the
 /// `format!` syntax for building a string.
 ///
-/// # Example
+/// # Examples
 ///
 /// ```should_fail
 /// # #![allow(unreachable_code)]
 /// panic!();
 /// panic!("this is a terrible mistake!");
-/// panic!(4i); // panic with the value of 4 to be collected elsewhere
+/// panic!(4); // panic with the value of 4 to be collected elsewhere
 /// panic!("this is a {} {message}", "fancy", message = "message");
 /// ```
 #[macro_export]
+#[stable(feature = "rust1", since = "1.0.0")]
 macro_rules! panic {
     () => ({
         panic!("explicit panic")
     });
     ($msg:expr) => ({
-        // static requires less code at runtime, more constant data
-        static _FILE_LINE: (&'static str, uint) = (file!(), line!());
-        ::std::rt::begin_unwind($msg, &_FILE_LINE)
+        $crate::rt::begin_unwind($msg, {
+            // static requires less code at runtime, more constant data
+            static _FILE_LINE: (&'static str, usize) = (file!(), line!() as usize);
+            &_FILE_LINE
+        })
     });
-    ($fmt:expr, $($arg:tt)*) => ({
-        // The leading _'s are to avoid dead code warnings if this is
-        // used inside a dead function. Just `#[allow(dead_code)]` is
-        // insufficient, since the user may have
-        // `#[forbid(dead_code)]` and which cannot be overridden.
-        static _FILE_LINE: (&'static str, uint) = (file!(), line!());
-        ::std::rt::begin_unwind_fmt(format_args!($fmt, $($arg)*), &_FILE_LINE)
-
+    ($fmt:expr, $($arg:tt)+) => ({
+        $crate::rt::begin_unwind_fmt(format_args!($fmt, $($arg)+), {
+            // The leading _'s are to avoid dead code warnings if this is
+            // used inside a dead function. Just `#[allow(dead_code)]` is
+            // insufficient, since the user may have
+            // `#[forbid(dead_code)]` and which cannot be overridden.
+            static _FILE_LINE: (&'static str, usize) = (file!(), line!() as usize);
+            &_FILE_LINE
+        })
     });
-}
-
-/// Ensure that a boolean expression is `true` at runtime.
-///
-/// This will invoke the `panic!` macro if the provided expression cannot be
-/// evaluated to `true` at runtime.
-///
-/// # Example
-///
-/// ```
-/// // the panic message for these assertions is the stringified value of the
-/// // expression given.
-/// assert!(true);
-/// # fn some_computation() -> bool { true }
-/// assert!(some_computation());
-///
-/// // assert with a custom message
-/// # let x = true;
-/// assert!(x, "x wasn't true!");
-/// # let a = 3i; let b = 27i;
-/// assert!(a + b == 30, "a = {}, b = {}", a, b);
-/// ```
-#[macro_export]
-macro_rules! assert {
-    ($cond:expr) => (
-        if !$cond {
-            panic!(concat!("assertion failed: ", stringify!($cond)))
-        }
-    );
-    ($cond:expr, $($arg:expr),+) => (
-        if !$cond {
-            panic!($($arg),+)
-        }
-    );
-}
-
-/// Asserts that two expressions are equal to each other, testing equality in
-/// both directions.
-///
-/// On panic, this macro will print the values of the expressions.
-///
-/// # Example
-///
-/// ```
-/// let a = 3i;
-/// let b = 1i + 2i;
-/// assert_eq!(a, b);
-/// ```
-#[macro_export]
-macro_rules! assert_eq {
-    ($left:expr , $right:expr) => ({
-        match (&($left), &($right)) {
-            (left_val, right_val) => {
-                // check both directions of equality....
-                if !((*left_val == *right_val) &&
-                     (*right_val == *left_val)) {
-                    panic!("assertion failed: `(left == right) && (right == left)` \
-                           (left: `{:?}`, right: `{:?}`)", *left_val, *right_val)
-                }
-            }
-        }
-    })
-}
-
-/// Ensure that a boolean expression is `true` at runtime.
-///
-/// This will invoke the `panic!` macro if the provided expression cannot be
-/// evaluated to `true` at runtime.
-///
-/// Unlike `assert!`, `debug_assert!` statements can be disabled by passing
-/// `--cfg ndebug` to the compiler. This makes `debug_assert!` useful for
-/// checks that are too expensive to be present in a release build but may be
-/// helpful during development.
-///
-/// # Example
-///
-/// ```
-/// // the panic message for these assertions is the stringified value of the
-/// // expression given.
-/// debug_assert!(true);
-/// # fn some_expensive_computation() -> bool { true }
-/// debug_assert!(some_expensive_computation());
-///
-/// // assert with a custom message
-/// # let x = true;
-/// debug_assert!(x, "x wasn't true!");
-/// # let a = 3i; let b = 27i;
-/// debug_assert!(a + b == 30, "a = {}, b = {}", a, b);
-/// ```
-#[macro_export]
-macro_rules! debug_assert {
-    ($($arg:tt)*) => (if cfg!(not(ndebug)) { assert!($($arg)*); })
-}
-
-/// Asserts that two expressions are equal to each other, testing equality in
-/// both directions.
-///
-/// On panic, this macro will print the values of the expressions.
-///
-/// Unlike `assert_eq!`, `debug_assert_eq!` statements can be disabled by
-/// passing `--cfg ndebug` to the compiler. This makes `debug_assert_eq!`
-/// useful for checks that are too expensive to be present in a release build
-/// but may be helpful during development.
-///
-/// # Example
-///
-/// ```
-/// let a = 3i;
-/// let b = 1i + 2i;
-/// debug_assert_eq!(a, b);
-/// ```
-#[macro_export]
-macro_rules! debug_assert_eq {
-    ($($arg:tt)*) => (if cfg!(not(ndebug)) { assert_eq!($($arg)*); })
-}
-
-/// A utility macro for indicating unreachable code.
-///
-/// This is useful any time that the compiler can't determine that some code is unreachable. For
-/// example:
-///
-/// * Match arms with guard conditions.
-/// * Loops that dynamically terminate.
-/// * Iterators that dynamically terminate.
-///
-/// # Panics
-///
-/// This will always panic.
-///
-/// # Examples
-///
-/// Match arms:
-///
-/// ```rust
-/// fn foo(x: Option<int>) {
-///     match x {
-///         Some(n) if n >= 0 => println!("Some(Non-negative)"),
-///         Some(n) if n <  0 => println!("Some(Negative)"),
-///         Some(_)           => unreachable!(), // compile error if commented out
-///         None              => println!("None")
-///     }
-/// }
-/// ```
-///
-/// Iterators:
-///
-/// ```rust
-/// fn divide_by_three(x: u32) -> u32 { // one of the poorest implementations of x/3
-///     for i in std::iter::count(0_u32, 1) {
-///         if 3*i < i { panic!("u32 overflow"); }
-///         if x < 3*i { return i-1; }
-///     }
-///     unreachable!();
-/// }
-/// ```
-#[macro_export]
-macro_rules! unreachable {
-    () => ({
-        panic!("internal error: entered unreachable code")
-    });
-    ($msg:expr) => ({
-        unreachable!("{}", $msg)
-    });
-    ($fmt:expr, $($arg:tt)*) => ({
-        panic!(concat!("internal error: entered unreachable code: ", $fmt), $($arg)*)
-    });
-}
-
-/// A standardised placeholder for marking unfinished code. It panics with the
-/// message `"not yet implemented"` when executed.
-#[macro_export]
-macro_rules! unimplemented {
-    () => (panic!("not yet implemented"))
-}
-
-/// Use the syntax described in `std::fmt` to create a value of type `String`.
-/// See `std::fmt` for more information.
-///
-/// # Example
-///
-/// ```
-/// format!("test");
-/// format!("hello {}", "world!");
-/// format!("x = {}, y = {y}", 10i, y = 30i);
-/// ```
-#[macro_export]
-#[stable]
-macro_rules! format {
-    ($($arg:tt)*) => (::std::fmt::format(format_args!($($arg)*)))
 }
 
 /// Equivalent to the `println!` macro except that a newline is not printed at
 /// the end of the message.
 #[macro_export]
-#[stable]
+#[stable(feature = "rust1", since = "1.0.0")]
 macro_rules! print {
-    ($($arg:tt)*) => (::std::io::stdio::print_args(format_args!($($arg)*)))
+    ($($arg:tt)*) => ($crate::old_io::stdio::print_args(format_args!($($arg)*)))
 }
 
 /// Macro for printing to a task's stdout handle.
 ///
-/// Each task can override its stdout handle via `std::io::stdio::set_stdout`.
+/// Each task can override its stdout handle via `std::old_io::stdio::set_stdout`.
 /// The syntax of this macro is the same as that used for `format!`. For more
-/// information, see `std::fmt` and `std::io::stdio`.
+/// information, see `std::fmt` and `std::old_io::stdio`.
 ///
-/// # Example
+/// # Examples
 ///
 /// ```
 /// println!("hello there!");
 /// println!("format {} arguments", "some");
 /// ```
 #[macro_export]
-#[stable]
+#[stable(feature = "rust1", since = "1.0.0")]
 macro_rules! println {
-    ($($arg:tt)*) => (::std::io::stdio::println_args(format_args!($($arg)*)))
+    ($($arg:tt)*) => ($crate::old_io::stdio::println_args(format_args!($($arg)*)))
 }
 
 /// Helper macro for unwrapping `Result` values while returning early with an
 /// error if the value of the expression is `Err`. For more information, see
 /// `std::io`.
 #[macro_export]
+#[stable(feature = "rust1", since = "1.0.0")]
 macro_rules! try {
-    ($expr:expr) => ({
-        use $crate::result::Result::{Ok, Err};
-
-        match $expr {
-            Ok(val) => val,
-            Err(err) => return Err($crate::error::FromError::from_error(err)),
+    ($expr:expr) => (match $expr {
+        $crate::result::Result::Ok(val) => val,
+        $crate::result::Result::Err(err) => {
+            return $crate::result::Result::Err($crate::error::FromError::from_error(err))
         }
     })
 }
@@ -292,19 +106,21 @@ macro_rules! try {
 /// receivers. It places no restrictions on the types of receivers given to
 /// this macro, this can be viewed as a heterogeneous select.
 ///
-/// # Example
+/// # Examples
 ///
 /// ```
-/// use std::thread::Thread;
-/// use std::sync::mpsc::channel;
+/// use std::thread;
+/// use std::sync::mpsc;
 ///
-/// let (tx1, rx1) = channel();
-/// let (tx2, rx2) = channel();
-/// # fn long_running_task() {}
-/// # fn calculate_the_answer() -> int { 42i }
+/// // two placeholder functions for now
+/// fn long_running_task() {}
+/// fn calculate_the_answer() -> u32 { 42 }
 ///
-/// Thread::spawn(move|| { long_running_task(); tx1.send(()).unwrap(); });
-/// Thread::spawn(move|| { tx2.send(calculate_the_answer()).unwrap(); });
+/// let (tx1, rx1) = mpsc::channel();
+/// let (tx2, rx2) = mpsc::channel();
+///
+/// thread::spawn(move|| { long_running_task(); tx1.send(()).unwrap(); });
+/// thread::spawn(move|| { tx2.send(calculate_the_answer()).unwrap(); });
 ///
 /// select! (
 ///     _ = rx1.recv() => println!("the long running task finished first"),
@@ -316,7 +132,7 @@ macro_rules! try {
 ///
 /// For more information about select, see the `std::sync::mpsc::Select` structure.
 #[macro_export]
-#[experimental]
+#[unstable(feature = "std_misc")]
 macro_rules! select {
     (
         $($name:pat = $rx:ident.$meth:ident() => $code:expr),+
@@ -361,7 +177,7 @@ pub mod builtin {
     ///
     /// For more information, see the documentation in `std::fmt`.
     ///
-    /// # Example
+    /// # Examples
     ///
     /// ```rust
     /// use std::fmt;
@@ -384,7 +200,7 @@ pub mod builtin {
     /// will be emitted.  To not emit a compile error, use the `option_env!`
     /// macro instead.
     ///
-    /// # Example
+    /// # Examples
     ///
     /// ```rust
     /// let path: &'static str = env!("PATH");
@@ -403,7 +219,7 @@ pub mod builtin {
     /// A compile time error is never emitted when using this macro regardless
     /// of whether the environment variable is present or not.
     ///
-    /// # Example
+    /// # Examples
     ///
     /// ```rust
     /// let key: Option<&'static str> = option_env!("SECRET_KEY");
@@ -411,26 +227,6 @@ pub mod builtin {
     /// ```
     #[macro_export]
     macro_rules! option_env { ($name:expr) => ({ /* compiler built-in */ }) }
-
-    /// Concatenate literals into a static byte slice.
-    ///
-    /// This macro takes any number of comma-separated literal expressions,
-    /// yielding an expression of type `&'static [u8]` which is the
-    /// concatenation (left to right) of all the literals in their byte format.
-    ///
-    /// This extension currently only supports string literals, character
-    /// literals, and integers less than 256. The byte slice returned is the
-    /// utf8-encoding of strings and characters.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// let rust = bytes!("r", 'u', "st", 255);
-    /// assert_eq!(rust[1], b'u');
-    /// assert_eq!(rust[4], 255);
-    /// ```
-    #[macro_export]
-    macro_rules! bytes { ($($e:expr),*) => ({ /* compiler built-in */ }) }
 
     /// Concatenate identifiers into one identifier.
     ///
@@ -441,13 +237,13 @@ pub mod builtin {
     /// statement or expression position, meaning this macro may be difficult to
     /// use in some situations.
     ///
-    /// # Example
+    /// # Examples
     ///
     /// ```
     /// #![feature(concat_idents)]
     ///
     /// # fn main() {
-    /// fn foobar() -> int { 23 }
+    /// fn foobar() -> u32 { 23 }
     ///
     /// let f = concat_idents!(foo, bar);
     /// println!("{}", f());
@@ -467,10 +263,10 @@ pub mod builtin {
     /// Integer and floating point literals are stringified in order to be
     /// concatenated.
     ///
-    /// # Example
+    /// # Examples
     ///
     /// ```
-    /// let s = concat!("test", 10i, 'b', true);
+    /// let s = concat!("test", 10, 'b', true);
     /// assert_eq!(s, "test10btrue");
     /// ```
     #[macro_export]
@@ -478,11 +274,11 @@ pub mod builtin {
 
     /// A macro which expands to the line number on which it was invoked.
     ///
-    /// The expanded expression has type `uint`, and the returned line is not
+    /// The expanded expression has type `usize`, and the returned line is not
     /// the invocation of the `line!()` macro itself, but rather the first macro
     /// invocation leading up to the invocation of the `line!()` macro.
     ///
-    /// # Example
+    /// # Examples
     ///
     /// ```
     /// let current_line = line!();
@@ -493,11 +289,11 @@ pub mod builtin {
 
     /// A macro which expands to the column number on which it was invoked.
     ///
-    /// The expanded expression has type `uint`, and the returned column is not
+    /// The expanded expression has type `usize`, and the returned column is not
     /// the invocation of the `column!()` macro itself, but rather the first macro
     /// invocation leading up to the invocation of the `column!()` macro.
     ///
-    /// # Example
+    /// # Examples
     ///
     /// ```
     /// let current_col = column!();
@@ -513,7 +309,7 @@ pub mod builtin {
     /// first macro invocation leading up to the invocation of the `file!()`
     /// macro.
     ///
-    /// # Example
+    /// # Examples
     ///
     /// ```
     /// let this_file = file!();
@@ -528,7 +324,7 @@ pub mod builtin {
     /// stringification of all the tokens passed to the macro. No restrictions
     /// are placed on the syntax of the macro invocation itself.
     ///
-    /// # Example
+    /// # Examples
     ///
     /// ```
     /// let one_plus_one = stringify!(1 + 1);
@@ -543,7 +339,7 @@ pub mod builtin {
     /// contents of the filename specified. The file is located relative to the
     /// current file (similarly to how modules are found),
     ///
-    /// # Example
+    /// # Examples
     ///
     /// ```rust,ignore
     /// let secret_key = include_str!("secret-key.ascii");
@@ -557,7 +353,7 @@ pub mod builtin {
     /// the contents of the filename specified. The file is located relative to
     /// the current file (similarly to how modules are found),
     ///
-    /// # Example
+    /// # Examples
     ///
     /// ```rust,ignore
     /// let secret_key = include_bytes!("secret-key.bin");
@@ -565,17 +361,13 @@ pub mod builtin {
     #[macro_export]
     macro_rules! include_bytes { ($file:expr) => ({ /* compiler built-in */ }) }
 
-    /// Deprecated alias for `include_bytes!()`.
-    #[macro_export]
-    macro_rules! include_bin { ($file:expr) => ({ /* compiler built-in */}) }
-
     /// Expands to a string that represents the current module path.
     ///
     /// The current module path can be thought of as the hierarchy of modules
     /// leading back up to the crate root. The first component of the path
     /// returned is the name of the crate currently being compiled.
     ///
-    /// # Example
+    /// # Examples
     ///
     /// ```rust
     /// mod test {
@@ -598,7 +390,7 @@ pub mod builtin {
     /// The syntax given to this macro is the same syntax as the `cfg`
     /// attribute.
     ///
-    /// # Example
+    /// # Examples
     ///
     /// ```rust
     /// let my_directory = if cfg!(windows) {

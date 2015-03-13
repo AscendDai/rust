@@ -36,17 +36,17 @@ pub fn expand_deriving_ord<F>(cx: &mut ExtCtxt,
                 generics: LifetimeBounds::empty(),
                 explicit_self: borrowed_explicit_self(),
                 args: vec!(borrowed_self()),
-                ret_ty: Literal(Path::new(vec!("bool"))),
+                ret_ty: Literal(path_local!(bool)),
                 attributes: attrs,
-                combine_substructure: combine_substructure(box |cx, span, substr| {
+                combine_substructure: combine_substructure(Box::new(|cx, span, substr| {
                     cs_op($op, $equal, cx, span, substr)
-                })
+                }))
             }
         } }
     }
 
-    let ordering_ty = Literal(Path::new(vec!["std", "cmp", "Ordering"]));
-    let ret_ty = Literal(Path::new_(vec!["std", "option", "Option"],
+    let ordering_ty = Literal(path_std!(cx, core::cmp::Ordering));
+    let ret_ty = Literal(Path::new_(pathvec_std!(cx, core::option::Option),
                                     None,
                                     vec![box ordering_ty],
                                     true));
@@ -61,15 +61,15 @@ pub fn expand_deriving_ord<F>(cx: &mut ExtCtxt,
         args: vec![borrowed_self()],
         ret_ty: ret_ty,
         attributes: attrs,
-        combine_substructure: combine_substructure(box |cx, span, substr| {
+        combine_substructure: combine_substructure(Box::new(|cx, span, substr| {
             cs_partial_cmp(cx, span, substr)
-        })
+        }))
     };
 
     let trait_def = TraitDef {
         span: span,
         attributes: vec![],
-        path: Path::new(vec!["std", "cmp", "PartialOrd"]),
+        path: path_std!(cx, core::cmp::PartialOrd),
         additional_bounds: vec![],
         generics: LifetimeBounds::empty(),
         methods: vec![
@@ -78,7 +78,8 @@ pub fn expand_deriving_ord<F>(cx: &mut ExtCtxt,
             md!("le", true, true),
             md!("gt", false, false),
             md!("ge", false, true)
-        ]
+        ],
+        associated_types: Vec::new(),
     };
     trait_def.expand(cx, mitem, item, push)
 }
@@ -106,7 +107,7 @@ pub fn cs_partial_cmp(cx: &mut ExtCtxt, span: Span,
               substr: &Substructure) -> P<Expr> {
     let test_id = cx.ident_of("__test");
     let ordering = cx.path_global(span,
-                                  vec!(cx.ident_of("std"),
+                                  vec!(cx.ident_of_std("core"),
                                        cx.ident_of("cmp"),
                                        cx.ident_of("Ordering"),
                                        cx.ident_of("Equal")));
@@ -114,7 +115,7 @@ pub fn cs_partial_cmp(cx: &mut ExtCtxt, span: Span,
     let equals_expr = cx.expr_some(span, ordering);
 
     let partial_cmp_path = vec![
-        cx.ident_of("std"),
+        cx.ident_of_std("core"),
         cx.ident_of("cmp"),
         cx.ident_of("PartialOrd"),
         cx.ident_of("partial_cmp"),
@@ -152,7 +153,7 @@ pub fn cs_partial_cmp(cx: &mut ExtCtxt, span: Span,
             let new = {
                 let other_f = match other_fs {
                     [ref o_f] => o_f,
-                    _ => cx.span_bug(span, "not exactly 2 arguments in `deriving(PartialOrd)`"),
+                    _ => cx.span_bug(span, "not exactly 2 arguments in `derive(PartialOrd)`"),
                 };
 
                 let args = vec![
@@ -174,13 +175,13 @@ pub fn cs_partial_cmp(cx: &mut ExtCtxt, span: Span,
             cx.expr_block(cx.block(span, vec!(assign), Some(if_)))
         },
         equals_expr.clone(),
-        box |cx, span, (self_args, tag_tuple), _non_self_args| {
+        Box::new(|cx, span, (self_args, tag_tuple), _non_self_args| {
             if self_args.len() != 2 {
-                cx.span_bug(span, "not exactly 2 arguments in `deriving(PartialOrd)`")
+                cx.span_bug(span, "not exactly 2 arguments in `derive(PartialOrd)`")
             } else {
                 some_ordering_collapsed(cx, span, PartialCmpOp, tag_tuple)
             }
-        },
+        }),
         cx, span, substr)
 }
 
@@ -210,7 +211,7 @@ fn cs_op(less: bool, equal: bool, cx: &mut ExtCtxt,
             */
             let other_f = match other_fs {
                 [ref o_f] => o_f,
-                _ => cx.span_bug(span, "not exactly 2 arguments in `deriving(PartialOrd)`")
+                _ => cx.span_bug(span, "not exactly 2 arguments in `derive(PartialOrd)`")
             };
 
             let cmp = cx.expr_binary(span, op, self_f.clone(), other_f.clone());
@@ -222,9 +223,9 @@ fn cs_op(less: bool, equal: bool, cx: &mut ExtCtxt,
             cx.expr_binary(span, ast::BiOr, cmp, and)
         },
         cx.expr_bool(span, equal),
-        box |cx, span, (self_args, tag_tuple), _non_self_args| {
+        Box::new(|cx, span, (self_args, tag_tuple), _non_self_args| {
             if self_args.len() != 2 {
-                cx.span_bug(span, "not exactly 2 arguments in `deriving(PartialOrd)`")
+                cx.span_bug(span, "not exactly 2 arguments in `derive(PartialOrd)`")
             } else {
                 let op = match (less, equal) {
                     (true,  true) => LeOp, (true,  false) => LtOp,
@@ -232,6 +233,6 @@ fn cs_op(less: bool, equal: bool, cx: &mut ExtCtxt,
                 };
                 some_ordering_collapsed(cx, span, op, tag_tuple)
             }
-        },
+        }),
         cx, span, substr)
 }

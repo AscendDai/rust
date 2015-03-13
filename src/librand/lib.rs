@@ -16,15 +16,27 @@
 //! is not recommended to use this library directly, but rather the official
 //! interface through `std::rand`.
 
+// Do not remove on snapshot creation. Needed for bootstrap. (Issue #22364)
+#![cfg_attr(stage0, feature(custom_attribute))]
 #![crate_name = "rand"]
 #![crate_type = "rlib"]
 #![doc(html_logo_url = "http://www.rust-lang.org/logos/rust-logo-128x128-blk.png",
        html_favicon_url = "http://www.rust-lang.org/favicon.ico",
        html_root_url = "http://doc.rust-lang.org/nightly/",
        html_playground_url = "http://play.rust-lang.org/")]
-
+#![feature(int_uint)]
+#![feature(no_std)]
 #![no_std]
-#![experimental]
+#![unstable(feature = "rand")]
+#![feature(staged_api)]
+#![staged_api]
+#![feature(core)]
+#![deprecated(reason = "use the crates.io `rand` library instead",
+              since = "1.0.0-alpha")]
+
+#![cfg_attr(test, feature(test, rand))]
+
+#![allow(deprecated)]
 
 #[macro_use]
 extern crate core;
@@ -33,6 +45,7 @@ extern crate core;
 #[cfg(test)] #[macro_use] extern crate log;
 
 use core::prelude::*;
+use core::marker::PhantomData;
 
 pub use isaac::{IsaacRng, Isaac64Rng};
 pub use chacha::ChaChaRng;
@@ -41,7 +54,7 @@ use distributions::{Range, IndependentSample};
 use distributions::range::SampleRange;
 
 #[cfg(test)]
-static RAND_BENCH_N: u64 = 100;
+const RAND_BENCH_N: u64 = 100;
 
 pub mod distributions;
 pub mod isaac;
@@ -133,12 +146,12 @@ pub trait Rng : Sized {
     /// (e.g. reading past the end of a file that is being used as the
     /// source of randomness).
     ///
-    /// # Example
+    /// # Examples
     ///
     /// ```rust
     /// use std::rand::{thread_rng, Rng};
     ///
-    /// let mut v = [0u8; 13579];
+    /// let mut v = [0; 13579];
     /// thread_rng().fill_bytes(&mut v);
     /// println!("{:?}", v.as_slice());
     /// ```
@@ -149,9 +162,9 @@ pub trait Rng : Sized {
         // (3) adds more `unsafe` that needs to be checked, (4)
         // probably doesn't give much performance gain if
         // optimisations are on.
-        let mut count = 0i;
+        let mut count = 0;
         let mut num = 0;
-        for byte in dest.iter_mut() {
+        for byte in dest {
             if count == 0 {
                 // we could micro-optimise here by generating a u32 if
                 // we only need a few more bytes to fill the vector
@@ -168,7 +181,7 @@ pub trait Rng : Sized {
 
     /// Return a random value of a `Rand` type.
     ///
-    /// # Example
+    /// # Examples
     ///
     /// ```rust
     /// use std::rand::{thread_rng, Rng};
@@ -186,19 +199,19 @@ pub trait Rng : Sized {
     /// Return an iterator that will yield an infinite number of randomly
     /// generated items.
     ///
-    /// # Example
+    /// # Examples
     ///
     /// ```
     /// use std::rand::{thread_rng, Rng};
     ///
     /// let mut rng = thread_rng();
     /// let x = rng.gen_iter::<uint>().take(10).collect::<Vec<uint>>();
-    /// println!("{}", x);
+    /// println!("{:?}", x);
     /// println!("{:?}", rng.gen_iter::<(f64, bool)>().take(5)
     ///                     .collect::<Vec<(f64, bool)>>());
     /// ```
     fn gen_iter<'a, T: Rand>(&'a mut self) -> Generator<'a, T, Self> {
-        Generator { rng: self }
+        Generator { rng: self, _marker: PhantomData }
     }
 
     /// Generate a random value in the range [`low`, `high`).
@@ -213,13 +226,13 @@ pub trait Rng : Sized {
     ///
     /// Panics if `low >= high`.
     ///
-    /// # Example
+    /// # Examples
     ///
     /// ```rust
     /// use std::rand::{thread_rng, Rng};
     ///
     /// let mut rng = thread_rng();
-    /// let n: uint = rng.gen_range(0u, 10);
+    /// let n: uint = rng.gen_range(0, 10);
     /// println!("{}", n);
     /// let m: f64 = rng.gen_range(-40.0f64, 1.3e5f64);
     /// println!("{}", m);
@@ -231,7 +244,7 @@ pub trait Rng : Sized {
 
     /// Return a bool with a 1 in n chance of true
     ///
-    /// # Example
+    /// # Examples
     ///
     /// ```rust
     /// use std::rand::{thread_rng, Rng};
@@ -245,7 +258,7 @@ pub trait Rng : Sized {
 
     /// Return an iterator of random characters from the set A-Z,a-z,0-9.
     ///
-    /// # Example
+    /// # Examples
     ///
     /// ```rust
     /// use std::rand::{thread_rng, Rng};
@@ -261,46 +274,45 @@ pub trait Rng : Sized {
     ///
     /// Return `None` if `values` is empty.
     ///
-    /// # Example
+    /// # Examples
     ///
     /// ```
     /// use std::rand::{thread_rng, Rng};
     ///
-    /// let choices = [1i, 2, 4, 8, 16, 32];
+    /// let choices = [1, 2, 4, 8, 16, 32];
     /// let mut rng = thread_rng();
     /// println!("{:?}", rng.choose(&choices));
-    /// # // uncomment when slicing syntax is stable
-    /// //assert_eq!(rng.choose(choices.index(&(0..0))), None);
+    /// assert_eq!(rng.choose(&choices[..0]), None);
     /// ```
     fn choose<'a, T>(&mut self, values: &'a [T]) -> Option<&'a T> {
         if values.is_empty() {
             None
         } else {
-            Some(&values[self.gen_range(0u, values.len())])
+            Some(&values[self.gen_range(0, values.len())])
         }
     }
 
     /// Shuffle a mutable slice in place.
     ///
-    /// # Example
+    /// # Examples
     ///
     /// ```rust
     /// use std::rand::{thread_rng, Rng};
     ///
     /// let mut rng = thread_rng();
-    /// let mut y = [1i, 2, 3];
+    /// let mut y = [1, 2, 3];
     /// rng.shuffle(&mut y);
-    /// println!("{}", y.as_slice());
+    /// println!("{:?}", y.as_slice());
     /// rng.shuffle(&mut y);
-    /// println!("{}", y.as_slice());
+    /// println!("{:?}", y.as_slice());
     /// ```
     fn shuffle<T>(&mut self, values: &mut [T]) {
         let mut i = values.len();
-        while i >= 2u {
+        while i >= 2 {
             // invariant: elements with index >= i have been locked in place.
-            i -= 1u;
+            i -= 1;
             // lock element i in place.
-            values.swap(i, self.gen_range(0u, i + 1u));
+            values.swap(i, self.gen_range(0, i + 1));
         }
     }
 }
@@ -310,6 +322,7 @@ pub trait Rng : Sized {
 /// This iterator is created via the `gen_iter` method on `Rng`.
 pub struct Generator<'a, T, R:'a> {
     rng: &'a mut R,
+    _marker: PhantomData<T>
 }
 
 impl<'a, T: Rand, R: Rng> Iterator for Generator<'a, T, R> {
@@ -331,7 +344,7 @@ impl<'a, R: Rng> Iterator for AsciiGenerator<'a, R> {
     type Item = char;
 
     fn next(&mut self) -> Option<char> {
-        static GEN_ASCII_STR_CHARSET: &'static [u8] =
+        const GEN_ASCII_STR_CHARSET: &'static [u8] =
             b"ABCDEFGHIJKLMNOPQRSTUVWXYZ\
               abcdefghijklmnopqrstuvwxyz\
               0123456789";
@@ -344,7 +357,7 @@ impl<'a, R: Rng> Iterator for AsciiGenerator<'a, R> {
 pub trait SeedableRng<Seed>: Rng {
     /// Reseed an RNG with the given seed.
     ///
-    /// # Example
+    /// # Examples
     ///
     /// ```rust
     /// use std::rand::{Rng, SeedableRng, StdRng};
@@ -359,7 +372,7 @@ pub trait SeedableRng<Seed>: Rng {
 
     /// Create a new RNG with the given seed.
     ///
-    /// # Example
+    /// # Examples
     ///
     /// ```rust
     /// use std::rand::{Rng, SeedableRng, StdRng};
@@ -381,7 +394,6 @@ pub trait SeedableRng<Seed>: Rng {
 /// [1]: Marsaglia, George (July 2003). ["Xorshift
 /// RNGs"](http://www.jstatsoft.org/v08/i14/paper). *Journal of
 /// Statistical Software*. Vol. 8 (Issue 14).
-#[allow(missing_copy_implementations)]
 #[derive(Clone)]
 pub struct XorShiftRng {
     x: u32,
@@ -465,7 +477,7 @@ impl Rand for XorShiftRng {
 /// `Rand` implementation for `f32` and `f64` for the half-open
 /// `[0,1)`.
 ///
-/// # Example
+/// # Examples
 /// ```rust
 /// use std::rand::{random, Open01};
 ///
@@ -481,7 +493,7 @@ pub struct Open01<F>(pub F);
 /// `Rand` implementation of `f32` and `f64` for the half-open
 /// `[0,1)`.
 ///
-/// # Example
+/// # Examples
 ///
 /// ```rust
 /// use std::rand::{random, Closed01};
@@ -490,15 +502,6 @@ pub struct Open01<F>(pub F);
 /// println!("f32 from [0,1]: {}", val);
 /// ```
 pub struct Closed01<F>(pub F);
-
-#[cfg(not(test))]
-mod std {
-    pub use core::{option, fmt}; // panic!()
-    pub use core::clone; // derive Clone
-    #[cfg(stage0)]
-    pub use core::marker as kinds;
-    pub use core::marker;
-}
 
 #[cfg(test)]
 mod test {

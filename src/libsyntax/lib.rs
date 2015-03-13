@@ -14,17 +14,33 @@
 //!
 //! This API is completely unstable and subject to change.
 
+// Do not remove on snapshot creation. Needed for bootstrap. (Issue #22364)
+#![cfg_attr(stage0, feature(custom_attribute))]
 #![crate_name = "syntax"]
-#![experimental]
+#![unstable(feature = "rustc_private")]
+#![staged_api]
 #![crate_type = "dylib"]
 #![crate_type = "rlib"]
 #![doc(html_logo_url = "http://www.rust-lang.org/logos/rust-logo-128x128-blk-v2.png",
        html_favicon_url = "http://www.rust-lang.org/favicon.ico",
        html_root_url = "http://doc.rust-lang.org/nightly/")]
 
-#![allow(unknown_features)]
-#![feature(slicing_syntax)]
+#![feature(box_patterns)]
+#![feature(box_syntax)]
+#![feature(collections)]
+#![feature(core)]
+#![feature(int_uint)]
+#![feature(old_io)]
+#![feature(libc)]
+#![feature(old_path)]
 #![feature(quote, unsafe_destructor)]
+#![feature(rustc_private)]
+#![feature(staged_api)]
+#![feature(std_misc)]
+#![feature(unicode)]
+#![feature(path)]
+#![feature(io)]
+#![feature(path_ext)]
 
 extern crate arena;
 extern crate fmt_macros;
@@ -32,6 +48,7 @@ extern crate serialize;
 extern crate term;
 extern crate libc;
 #[macro_use] extern crate log;
+#[macro_use] #[no_link] extern crate rustc_bitflags;
 
 extern crate "serialize" as rustc_serialize; // used by deriving
 
@@ -81,15 +98,12 @@ pub mod ext {
     pub mod asm;
     pub mod base;
     pub mod build;
-    pub mod bytes;
     pub mod cfg;
-    pub mod cfg_attr;
     pub mod concat;
     pub mod concat_idents;
     pub mod deriving;
     pub mod env;
     pub mod expand;
-    pub mod fmt;
     pub mod format;
     pub mod log_syntax;
     pub mod mtwt;

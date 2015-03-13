@@ -8,15 +8,17 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-pub fn main() {
-    assert!(Some(box() ()).is_some());
+// FIXME (#22405): Replace `Box::new` with `box` here when/if possible.
 
-    let xs: Box<[()]> = box [];
+pub fn main() {
+    assert!(Some(Box::new(())).is_some());
+
+    let xs: Box<[()]> = Box::<[(); 0]>::new([]);
     assert!(Some(xs).is_some());
 
     struct Foo;
-    assert!(Some(box Foo).is_some());
+    assert!(Some(Box::new(Foo)).is_some());
 
-    let ys: Box<[Foo]> = box [];
+    let ys: Box<[Foo]> = Box::<[Foo; 0]>::new([]);
     assert!(Some(ys).is_some());
 }

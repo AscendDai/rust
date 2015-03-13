@@ -8,6 +8,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+// DON'T REENABLE THIS UNLESS YOU'VE ACTUALLY FIXED THE UNDERLYING ISSUE
 // ignore-android seems to block forever
 
 #![forbid(warnings)]
@@ -18,11 +19,13 @@
 // A var moved into a proc, that has a mutable loan path should
 // not trigger a misleading unused_mut warning.
 
-use std::thread::Thread;
+use std::io::prelude::*;
+use std::thread;
 
 pub fn main() {
     let mut stdin = std::io::stdin();
-    Thread::spawn(move|| {
-        let _ = stdin.read_to_end();
-    });
+    thread::spawn(move|| {
+        let mut v = Vec::new();
+        let _ = stdin.read_to_end(&mut v);
+    }).join().ok().unwrap();
 }

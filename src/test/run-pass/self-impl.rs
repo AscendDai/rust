@@ -10,9 +10,12 @@
 
 // Test that we can use `Self` types in impls in the expected way.
 
+#![allow(unknown_features)]
+#![feature(box_syntax)]
+
 struct Foo;
 
-// Test uses on inherant impl.
+// Test uses on inherent impl.
 impl Foo {
     fn foo(_x: Self, _y: &Self, _z: Box<Self>) -> Self {
         Foo
@@ -26,6 +29,7 @@ pub struct Baz<X> {
 
 trait Bar<X> {
     fn bar(x: Self, y: &Self, z: Box<Self>) -> Self;
+    fn dummy(&self, x: X) { }
 }
 
 impl Bar<int> for Box<Baz<int>> {

@@ -9,7 +9,6 @@
 // except according to those terms.
 
 // ignore-tidy-linelength
-// ignore-android: FIXME(#10381)
 // min-lldb-version: 310
 
 // compile-flags:-g
@@ -113,8 +112,10 @@
 // lldb-check:[...]$14 = -10
 // lldb-command:continue
 
+#![feature(box_syntax)]
 #![omit_gdb_pretty_printer_section]
 
+#[derive(Copy)]
 enum Enum {
     Variant1 { x: u16, y: u16 },
     Variant2 (u32)
@@ -143,13 +144,11 @@ fn main() {
     let _ = stack.self_by_ref(-1, -2);
     let _ = stack.self_by_val(-3, -4);
 
-    let owned = box Enum::Variant1{ x: 1799, y: 1799 };
+    let owned: Box<_> = box Enum::Variant1{ x: 1799, y: 1799 };
     let _ = owned.self_by_ref(-5, -6);
     let _ = owned.self_by_val(-7, -8);
     let _ = owned.self_owned(-9, -10);
 }
 
 fn zzz() {()}
-
-impl Copy for Enum {}
 

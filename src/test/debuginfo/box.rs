@@ -8,7 +8,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-// ignore-android: FIXME(#10381)
 // min-lldb-version: 310
 
 // compile-flags:-g
@@ -32,11 +31,12 @@
 // lldb-check:[...]$1 = (2, 3.5)
 
 #![allow(unused_variables)]
+#![feature(box_syntax)]
 #![omit_gdb_pretty_printer_section]
 
 fn main() {
-    let a = box 1i;
-    let b = box() (2i, 3.5f64);
+    let a = box 1;
+    let b = box() (2, 3.5f64);
 
     zzz(); // #break
 }

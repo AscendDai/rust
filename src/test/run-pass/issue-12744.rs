@@ -9,6 +9,7 @@
 // except according to those terms.
 
 fn main() {
-    fn test() -> Box<std::any::Any + 'static> { box 1i }
+    // FIXME (#22405): Replace `Box::new` with `box` here when/if possible.
+    fn test() -> Box<std::any::Any + 'static> { Box::new(1) }
     println!("{:?}", test())
 }

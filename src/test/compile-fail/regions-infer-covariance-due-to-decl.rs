@@ -17,12 +17,12 @@
 use std::marker;
 
 struct Covariant<'a> {
-    marker: marker::CovariantLifetime<'a>
+    marker: marker::PhantomData<fn(&'a ())>
 }
 
 fn use_<'short,'long>(c: Covariant<'long>,
-                      s: &'short int,
-                      l: &'long int,
+                      s: &'short isize,
+                      l: &'long isize,
                       _where:Option<&'short &'long ()>) {
 
     // Test whether Covariant<'long> <: Covariant<'short>.  Since

@@ -8,16 +8,18 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-trait Trait {}
+use std::marker::MarkerTrait;
+
+trait Trait : MarkerTrait {}
 
 struct Foo<T:Trait> {
     x: T,
 }
 
 enum Bar<T:Trait> {
-    ABar(int),
+    ABar(isize),
     BBar(T),
-    CBar(uint),
+    CBar(usize),
 }
 
 fn explode(x: Foo<u32>) {}
@@ -33,12 +35,12 @@ impl<T> Foo<T> {
 
 struct Baz {
 //~^ ERROR not implemented
-    a: Foo<int>,
+    a: Foo<isize>,
 }
 
 enum Boo {
 //~^ ERROR not implemented
-    Quux(Bar<uint>),
+    Quux(Bar<usize>),
 }
 
 struct Badness<U> {
@@ -51,15 +53,15 @@ enum MoreBadness<V> {
     EvenMoreBadness(Bar<V>),
 }
 
-trait PolyTrait<T> {
-    fn whatever() {}
+trait PolyTrait<T>
+{
+    fn whatever(&self, t: T) {}
 }
 
 struct Struct;
 
-impl PolyTrait<Foo<uint>> for Struct {
+impl PolyTrait<Foo<usize>> for Struct {
 //~^ ERROR not implemented
-    fn whatever() {}
 }
 
 fn main() {

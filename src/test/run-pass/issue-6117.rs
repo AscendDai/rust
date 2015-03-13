@@ -8,11 +8,10 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-
 enum Either<T, U> { Left(T), Right(U) }
 
 pub fn main() {
-    match Either::Left(box 17i) {
+    match Either::Left(Box::new(17)) {
         Either::Right(()) => {}
         _ => {}
     }

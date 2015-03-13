@@ -11,15 +11,20 @@
 // Check that parenthetical notation is feature-gated except with the
 // `Fn` traits.
 
-trait Foo<A,R> {
+use std::marker;
+
+trait Foo<A> {
+    type Output;
+
+    fn dummy(&self, a: A) { }
 }
 
 fn main() {
-    let x: Box<Foo(int)>;
+    let x: Box<Foo(isize)>;
     //~^ ERROR parenthetical notation is only stable when used with the `Fn` family
 
     // No errors with these:
-    let x: Box<Fn(int)>;
-    let x: Box<FnMut(int)>;
-    let x: Box<FnOnce(int)>;
+    let x: Box<Fn(isize)>;
+    let x: Box<FnMut(isize)>;
+    let x: Box<FnOnce(isize)>;
 }

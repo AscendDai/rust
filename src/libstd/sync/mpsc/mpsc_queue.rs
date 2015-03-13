@@ -35,7 +35,7 @@
 //! method, and see the method for more information about it. Due to this
 //! caveat, this queue may not be appropriate for all use-cases.
 
-#![experimental]
+#![unstable(feature = "std_misc")]
 
 // http://www.1024cores.net/home/lock-free-algorithms
 //                         /queues/non-intrusive-mpsc-node-based-queue
@@ -44,8 +44,9 @@ pub use self::PopResult::*;
 
 use core::prelude::*;
 
+use alloc::boxed;
 use alloc::boxed::Box;
-use core::mem;
+use core::ptr;
 use core::cell::UnsafeCell;
 
 use sync::atomic::{AtomicPtr, Ordering};
@@ -77,12 +78,12 @@ pub struct Queue<T> {
 }
 
 unsafe impl<T:Send> Send for Queue<T> { }
-unsafe impl<T:Send> Sync for Queue<T> { }
+unsafe impl<T: Send> Sync for Queue<T> { }
 
 impl<T> Node<T> {
     unsafe fn new(v: Option<T>) -> *mut Node<T> {
-        mem::transmute(box Node {
-            next: AtomicPtr::new(0 as *mut Node<T>),
+        boxed::into_raw(box Node {
+            next: AtomicPtr::new(ptr::null_mut()),
             value: v,
         })
     }
@@ -128,7 +129,7 @@ impl<T: Send> Queue<T> {
                 assert!((*tail).value.is_none());
                 assert!((*next).value.is_some());
                 let ret = (*next).value.take().unwrap();
-                let _: Box<Node<T>> = mem::transmute(tail);
+                let _: Box<Node<T>> = Box::from_raw(tail);
                 return Data(ret);
             }
 
@@ -138,14 +139,14 @@ impl<T: Send> Queue<T> {
 }
 
 #[unsafe_destructor]
-#[stable]
+#[stable(feature = "rust1", since = "1.0.0")]
 impl<T: Send> Drop for Queue<T> {
     fn drop(&mut self) {
         unsafe {
             let mut cur = *self.tail.get();
             while !cur.is_null() {
                 let next = (*cur).next.load(Ordering::Relaxed);
-                let _: Box<Node<T>> = mem::transmute(cur);
+                let _: Box<Node<T>> = Box::from_raw(cur);
                 cur = next;
             }
         }
@@ -159,19 +160,19 @@ mod tests {
     use sync::mpsc::channel;
     use super::{Queue, Data, Empty, Inconsistent};
     use sync::Arc;
-    use thread::Thread;
+    use thread;
 
     #[test]
     fn test_full() {
-        let q = Queue::new();
-        q.push(box 1i);
-        q.push(box 2i);
+        let q: Queue<Box<_>> = Queue::new();
+        q.push(box 1);
+        q.push(box 2);
     }
 
     #[test]
     fn test() {
-        let nthreads = 8u;
-        let nmsgs = 1000u;
+        let nthreads = 8;
+        let nmsgs = 1000;
         let q = Queue::new();
         match q.pop() {
             Empty => {}
@@ -180,18 +181,18 @@ mod tests {
         let (tx, rx) = channel();
         let q = Arc::new(q);
 
-        for _ in range(0, nthreads) {
+        for _ in 0..nthreads {
             let tx = tx.clone();
             let q = q.clone();
-            Thread::spawn(move|| {
-                for i in range(0, nmsgs) {
+            thread::spawn(move|| {
+                for i in 0..nmsgs {
                     q.push(i);
                 }
                 tx.send(()).unwrap();
             });
         }
 
-        let mut i = 0u;
+        let mut i = 0;
         while i < nthreads * nmsgs {
             match q.pop() {
                 Empty | Inconsistent => {},
@@ -199,7 +200,7 @@ mod tests {
             }
         }
         drop(tx);
-        for _ in range(0, nthreads) {
+        for _ in 0..nthreads {
             rx.recv().unwrap();
         }
     }

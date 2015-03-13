@@ -14,8 +14,11 @@
 //! Parsing does not happen at runtime: structures of `std::fmt::rt` are
 //! generated instead.
 
+// Do not remove on snapshot creation. Needed for bootstrap. (Issue #22364)
+#![cfg_attr(stage0, feature(custom_attribute))]
 #![crate_name = "fmt_macros"]
-#![experimental]
+#![unstable(feature = "rustc_private")]
+#![staged_api]
 #![crate_type = "rlib"]
 #![crate_type = "dylib"]
 #![doc(html_logo_url = "http://www.rust-lang.org/logos/rust-logo-128x128-blk-v2.png",
@@ -23,7 +26,8 @@
        html_root_url = "http://doc.rust-lang.org/nightly/",
        html_playground_url = "http://play.rust-lang.org/")]
 
-#![feature(slicing_syntax)]
+#![feature(staged_api)]
+#![feature(unicode)]
 
 pub use self::Piece::*;
 pub use self::Position::*;
@@ -62,7 +66,7 @@ pub struct FormatSpec<'a> {
     /// Optionally specified alignment
     pub align: Alignment,
     /// Packed version of various flags provided
-    pub flags: uint,
+    pub flags: u32,
     /// The integer precision to use
     pub precision: Count<'a>,
     /// The string width requested for the resulting format
@@ -79,7 +83,7 @@ pub enum Position<'a> {
     /// The argument will be in the next position. This is the default.
     ArgumentNext,
     /// The argument is located at a specific index.
-    ArgumentIs(uint),
+    ArgumentIs(usize),
     /// The argument has a name.
     ArgumentNamed(&'a str),
 }
@@ -118,11 +122,11 @@ pub enum Flag {
 #[derive(Copy, PartialEq)]
 pub enum Count<'a> {
     /// The count is specified explicitly.
-    CountIs(uint),
+    CountIs(usize),
     /// The count is specified by the argument with the given name.
     CountIsName(&'a str),
     /// The count is specified by the argument at the given index.
-    CountIsParam(uint),
+    CountIsParam(usize),
     /// The count is specified by the next parameter.
     CountIsNextParam,
     /// The count is implied and cannot be explicitly specified.
@@ -211,12 +215,12 @@ impl<'a> Parser<'a> {
                 self.cur.next();
             }
             Some((_, other)) => {
-                self.err(format!("expected `{:?}`, found `{:?}`", c,
-                                 other).index(&FullRange));
+                self.err(&format!("expected `{:?}`, found `{:?}`", c,
+                                  other));
             }
             None => {
-                self.err(format!("expected `{:?}` but string was terminated",
-                                 c).index(&FullRange));
+                self.err(&format!("expected `{:?}` but string was terminated",
+                                  c));
             }
         }
     }
@@ -234,17 +238,17 @@ impl<'a> Parser<'a> {
 
     /// Parses all of a string which is to be considered a "raw literal" in a
     /// format string. This is everything outside of the braces.
-    fn string(&mut self, start: uint) -> &'a str {
+    fn string(&mut self, start: usize) -> &'a str {
         loop {
             // we may not consume the character, so clone the iterator
             match self.cur.clone().next() {
                 Some((pos, '}')) | Some((pos, '{')) => {
-                    return self.input.index(&(start..pos));
+                    return &self.input[start..pos];
                 }
                 Some(..) => { self.cur.next(); }
                 None => {
                     self.cur.next();
-                    return self.input.index(&(start..self.input.len()));
+                    return &self.input[start..self.input.len()];
                 }
             }
         }
@@ -284,7 +288,7 @@ impl<'a> Parser<'a> {
             flags: 0,
             precision: CountImplied,
             width: CountImplied,
-            ty: self.input.index(&(0..0)),
+            ty: &self.input[..0],
         };
         if !self.consume(':') { return spec }
 
@@ -311,13 +315,13 @@ impl<'a> Parser<'a> {
         }
         // Sign flags
         if self.consume('+') {
-            spec.flags |= 1 << (FlagSignPlus as uint);
+            spec.flags |= 1 << (FlagSignPlus as u32);
         } else if self.consume('-') {
-            spec.flags |= 1 << (FlagSignMinus as uint);
+            spec.flags |= 1 << (FlagSignMinus as u32);
         }
         // Alternate marker
         if self.consume('#') {
-            spec.flags |= 1 << (FlagAlternate as uint);
+            spec.flags |= 1 << (FlagAlternate as u32);
         }
         // Width and precision
         let mut havewidth = false;
@@ -330,7 +334,7 @@ impl<'a> Parser<'a> {
                 spec.width = CountIsParam(0);
                 havewidth = true;
             } else {
-                spec.flags |= 1 << (FlagSignAwareZeroPad as uint);
+                spec.flags |= 1 << (FlagSignAwareZeroPad as u32);
             }
         }
         if !havewidth {
@@ -393,7 +397,7 @@ impl<'a> Parser<'a> {
                 self.cur.next();
                 pos
             }
-            Some(..) | None => { return self.input.index(&(0..0)); }
+            Some(..) | None => { return &self.input[..0]; }
         };
         let mut end;
         loop {
@@ -405,12 +409,12 @@ impl<'a> Parser<'a> {
                 None => { end = self.input.len(); break }
             }
         }
-        self.input.index(&(start..end))
+        &self.input[start..end]
     }
 
     /// Optionally parses an integer at the current position. This doesn't deal
     /// with overflow at all, it's just accumulating digits.
-    fn integer(&mut self) -> Option<uint> {
+    fn integer(&mut self) -> Option<usize> {
         let mut cur = 0;
         let mut found = false;
         loop {
@@ -418,7 +422,7 @@ impl<'a> Parser<'a> {
                 Some((_, c)) => {
                     match c.to_digit(10) {
                         Some(i) => {
-                            cur = cur * 10 + i;
+                            cur = cur * 10 + i as usize;
                             found = true;
                             self.cur.next();
                         }
@@ -441,7 +445,7 @@ mod tests {
     use super::*;
 
     fn same(fmt: &'static str, p: &[Piece<'static>]) {
-        let mut parser = Parser::new(fmt);
+        let parser = Parser::new(fmt);
         assert!(p == parser.collect::<Vec<Piece<'static>>>());
     }
 
@@ -614,7 +618,7 @@ mod tests {
             format: FormatSpec {
                 fill: None,
                 align: AlignUnknown,
-                flags: (1 << FlagSignMinus as uint),
+                flags: (1 << FlagSignMinus as u32),
                 precision: CountImplied,
                 width: CountImplied,
                 ty: "",
@@ -625,7 +629,7 @@ mod tests {
             format: FormatSpec {
                 fill: None,
                 align: AlignUnknown,
-                flags: (1 << FlagSignPlus as uint) | (1 << FlagAlternate as uint),
+                flags: (1 << FlagSignPlus as u32) | (1 << FlagAlternate as u32),
                 precision: CountImplied,
                 width: CountImplied,
                 ty: "",

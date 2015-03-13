@@ -26,10 +26,10 @@ mod rustrt {
 }
 
 extern fn cb(data: libc::uintptr_t) -> libc::uintptr_t {
-    if data == 1u {
+    if data == 1 {
         data
     } else {
-        count(data - 1u) + count(data - 1u)
+        count(data - 1) + count(data - 1)
     }
 }
 
@@ -41,9 +41,9 @@ fn count(n: uint) -> uint {
 }
 
 fn main() {
-    for _ in range(0, 10u) {
+    for _ in 0..10 {
         task::spawn(move|| {
-            let result = count(5u);
+            let result = count(5);
             println!("result = %?", result);
             panic!();
         });

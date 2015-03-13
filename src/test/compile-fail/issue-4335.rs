@@ -13,10 +13,13 @@
 fn id<T>(t: T) -> T { t }
 
 fn f<'r, T>(v: &'r T) -> Box<FnMut() -> T + 'r> {
-    id(box |&mut:| *v) //~ ERROR cannot infer
+    // FIXME (#22405): Replace `Box::new` with `box` here when/if possible.
+    id(Box::new(|| *v))
+        //~^ ERROR `v` does not live long enough
+        //~| ERROR cannot move out of borrowed content
 }
 
 fn main() {
-    let v = &5i;
+    let v = &5;
     println!("{}", f(v).call_mut(()));
 }

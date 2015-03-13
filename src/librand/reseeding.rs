@@ -18,7 +18,7 @@ use core::default::Default;
 
 /// How many bytes of entropy the underling RNG is allowed to generate
 /// before it is reseeded.
-static DEFAULT_GENERATION_THRESHOLD: uint = 32 * 1024;
+const DEFAULT_GENERATION_THRESHOLD: uint = 32 * 1024;
 
 /// A wrapper around any RNG which reseeds the underlying RNG after it
 /// has generated a certain number of random bytes.
@@ -100,7 +100,7 @@ impl<S, R: SeedableRng<S>, Rsdr: Reseeder<R> + Default>
 
 /// Something that can be used to reseed an RNG via `ReseedingRng`.
 ///
-/// # Example
+/// # Examples
 ///
 /// ```rust
 /// use std::rand::{Rng, SeedableRng, StdRng};
@@ -141,9 +141,9 @@ impl<R: Rng + Default> Reseeder<R> for ReseedWithDefault {
         *rng = Default::default();
     }
 }
-#[stable]
+#[stable(feature = "rust1", since = "1.0.0")]
 impl Default for ReseedWithDefault {
-    #[stable]
+    #[stable(feature = "rust1", since = "1.0.0")]
     fn default() -> ReseedWithDefault { ReseedWithDefault }
 }
 
@@ -187,7 +187,7 @@ mod test {
         let mut rs = ReseedingRng::new(Counter {i:0}, 400, ReseedWithDefault);
 
         let mut i = 0;
-        for _ in range(0u, 1000) {
+        for _ in 0..1000 {
             assert_eq!(rs.next_u32(), i % 100);
             i += 1;
         }
@@ -212,11 +212,11 @@ mod test {
         assert_eq!(string1, string2);
     }
 
-    static FILL_BYTES_V_LEN: uint = 13579;
+    const FILL_BYTES_V_LEN: uint = 13579;
     #[test]
     fn test_rng_fill_bytes() {
-        let mut v = repeat(0u8).take(FILL_BYTES_V_LEN).collect::<Vec<_>>();
-        ::test::rng().fill_bytes(v.as_mut_slice());
+        let mut v = repeat(0).take(FILL_BYTES_V_LEN).collect::<Vec<_>>();
+        ::test::rng().fill_bytes(&mut v);
 
         // Sanity test: if we've gotten here, `fill_bytes` has not infinitely
         // recursed.
@@ -225,7 +225,7 @@ mod test {
         // To test that `fill_bytes` actually did something, check that the
         // average of `v` is not 0.
         let mut sum = 0.0;
-        for &x in v.iter() {
+        for &x in &v {
             sum += x as f64;
         }
         assert!(sum / v.len() as f64 != 0.0);

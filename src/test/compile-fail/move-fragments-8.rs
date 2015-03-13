@@ -22,7 +22,9 @@
 // also that in this case we cannot do a move out of `&T`, so we only
 // test writing `*p.x` here.
 
-pub struct D { d: int }
+#![feature(rustc_attrs)]
+
+pub struct D { d: isize }
 impl Drop for D { fn drop(&mut self) { } }
 
 pub struct Pair<X,Y> { x: X, y: Y }

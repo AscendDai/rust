@@ -20,12 +20,12 @@ use std::marker;
 // Contravariant<'foo> <: Contravariant<'static> because
 // 'foo <= 'static
 struct Contravariant<'a> {
-    marker: marker::ContravariantLifetime<'a>
+    marker: marker::PhantomData<&'a()>
 }
 
 fn use_<'short,'long>(c: Contravariant<'short>,
-                      s: &'short int,
-                      l: &'long int,
+                      s: &'short isize,
+                      l: &'long isize,
                       _where:Option<&'short &'long ()>) {
 
     // Test whether Contravariant<'short> <: Contravariant<'long>.  Since

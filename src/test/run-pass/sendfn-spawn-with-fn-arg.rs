@@ -8,7 +8,10 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::thread::Thread;
+#![allow(unknown_features)]
+#![feature(box_syntax)]
+
+use std::thread;
 
 pub fn main() { test05(); }
 
@@ -17,12 +20,12 @@ fn test05_start<F:FnOnce(int)>(f: F) {
 }
 
 fn test05() {
-    let three = box 3;
-    let fn_to_send = move|: n:int| {
+    let three: Box<_> = box 3;
+    let fn_to_send = move|n:int| {
         println!("{}", *three + n); // will copy x into the closure
         assert_eq!(*three, 3);
     };
-    Thread::scoped(move|| {
+    thread::spawn(move|| {
         test05_start(fn_to_send);
     }).join().ok().unwrap();
 }

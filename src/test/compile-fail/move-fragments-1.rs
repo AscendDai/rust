@@ -18,7 +18,9 @@
 // These are all fairly trivial cases: unused variables or direct
 // drops of substructure.
 
-pub struct D { d: int }
+#![feature(rustc_attrs)]
+
+pub struct D { d: isize }
 impl Drop for D { fn drop(&mut self) { } }
 
 #[rustc_move_fragments]

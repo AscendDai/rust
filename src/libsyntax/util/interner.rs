@@ -8,13 +8,13 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-//! An "interner" is a data structure that associates values with uint tags and
+//! An "interner" is a data structure that associates values with usize tags and
 //! allows bidirectional lookup; i.e. given a value, one can easily find the
 //! type, and vice versa.
 
 use ast::Name;
 
-use std::borrow::BorrowFrom;
+use std::borrow::Borrow;
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -28,7 +28,7 @@ pub struct Interner<T> {
     vect: RefCell<Vec<T> >,
 }
 
-// when traits can extend traits, we should extend index<Name,T> to get .index(&FullRange)
+// when traits can extend traits, we should extend index<Name,T> to get []
 impl<T: Eq + Hash + Clone + 'static> Interner<T> {
     pub fn new() -> Interner<T> {
         Interner {
@@ -39,7 +39,7 @@ impl<T: Eq + Hash + Clone + 'static> Interner<T> {
 
     pub fn prefill(init: &[T]) -> Interner<T> {
         let rv = Interner::new();
-        for v in init.iter() {
+        for v in init {
             rv.intern((*v).clone());
         }
         rv
@@ -69,16 +69,16 @@ impl<T: Eq + Hash + Clone + 'static> Interner<T> {
 
     pub fn get(&self, idx: Name) -> T {
         let vect = self.vect.borrow();
-        (*vect)[idx.uint()].clone()
+        (*vect)[idx.usize()].clone()
     }
 
-    pub fn len(&self) -> uint {
+    pub fn len(&self) -> usize {
         let vect = self.vect.borrow();
         (*vect).len()
     }
 
     pub fn find<Q: ?Sized>(&self, val: &Q) -> Option<Name>
-    where Q: BorrowFrom<T> + Eq + Hash {
+    where T: Borrow<Q>, Q: Eq + Hash {
         let map = self.map.borrow();
         match (*map).get(val) {
             Some(v) => Some(*v),
@@ -109,27 +109,34 @@ impl Eq for RcStr {}
 
 impl Ord for RcStr {
     fn cmp(&self, other: &RcStr) -> Ordering {
-        self.index(&FullRange).cmp(other.index(&FullRange))
+        self[..].cmp(&other[..])
     }
 }
 
-impl fmt::Show for RcStr {
+impl fmt::Debug for RcStr {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use std::fmt::Show;
-        self.index(&FullRange).fmt(f)
+        use std::fmt::Debug;
+        self[..].fmt(f)
     }
 }
 
-impl BorrowFrom<RcStr> for str {
-    fn borrow_from(owned: &RcStr) -> &str {
-        owned.string.index(&FullRange)
+impl fmt::Display for RcStr {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use std::fmt::Display;
+        self[..].fmt(f)
+    }
+}
+
+impl Borrow<str> for RcStr {
+    fn borrow(&self) -> &str {
+        &self.string[..]
     }
 }
 
 impl Deref for RcStr {
     type Target = str;
 
-    fn deref(&self) -> &str { self.string.index(&FullRange) }
+    fn deref(&self) -> &str { &self.string[..] }
 }
 
 /// A StrInterner differs from Interner<String> in that it accepts
@@ -139,7 +146,7 @@ pub struct StrInterner {
     vect: RefCell<Vec<RcStr> >,
 }
 
-/// When traits can extend traits, we should extend index<Name,T> to get .index(&FullRange)
+/// When traits can extend traits, we should extend index<Name,T> to get []
 impl StrInterner {
     pub fn new() -> StrInterner {
         StrInterner {
@@ -150,7 +157,7 @@ impl StrInterner {
 
     pub fn prefill(init: &[&str]) -> StrInterner {
         let rv = StrInterner::new();
-        for &v in init.iter() { rv.intern(v); }
+        for &v in init { rv.intern(v); }
         rv
     }
 
@@ -189,21 +196,21 @@ impl StrInterner {
         let new_idx = Name(self.len() as u32);
         // leave out of map to avoid colliding
         let mut vect = self.vect.borrow_mut();
-        let existing = (*vect)[idx.uint()].clone();
+        let existing = (*vect)[idx.usize()].clone();
         vect.push(existing);
         new_idx
     }
 
     pub fn get(&self, idx: Name) -> RcStr {
-        (*self.vect.borrow())[idx.uint()].clone()
+        (*self.vect.borrow())[idx.usize()].clone()
     }
 
-    pub fn len(&self) -> uint {
+    pub fn len(&self) -> usize {
         self.vect.borrow().len()
     }
 
     pub fn find<Q: ?Sized>(&self, val: &Q) -> Option<Name>
-    where Q: BorrowFrom<RcStr> + Eq + Hash {
+    where RcStr: Borrow<Q>, Q: Eq + Hash {
         match (*self.map.borrow()).get(val) {
             Some(v) => Some(*v),
             None => None,
@@ -227,7 +234,7 @@ mod tests {
     use ast::Name;
 
     #[test]
-    #[should_fail]
+    #[should_panic]
     fn i1 () {
         let i : Interner<RcStr> = Interner::new();
         i.get(Name(13));

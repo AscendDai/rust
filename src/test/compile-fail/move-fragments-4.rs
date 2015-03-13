@@ -19,7 +19,9 @@
 // early draft of the code did not properly traverse up through all of
 // the parents of the leaf fragment.)
 
-pub struct D { d: int }
+#![feature(rustc_attrs)]
+
+pub struct D { d: isize }
 impl Drop for D { fn drop(&mut self) { } }
 
 pub struct Pair<X,Y> { x: X, y: Y }

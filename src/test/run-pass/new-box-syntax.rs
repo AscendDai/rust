@@ -11,6 +11,9 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
+#![allow(unknown_features)]
+#![feature(box_syntax)]
+
 // Tests that the new `box` syntax works with unique pointers.
 
 use std::boxed::{Box, HEAP};
@@ -21,8 +24,8 @@ struct Structure {
 }
 
 pub fn main() {
-    let x: Box<int> = box(HEAP) 2i;
-    let y: Box<int> = box 2i;
-    let b: Box<int> = box()(1i + 2);
-    let c = box()(3i + 4);
+    let x: Box<int> = box(HEAP) 2;
+    let y: Box<int> = box 2;
+    let b: Box<int> = box()(1 + 2);
+    let c = box()(3 + 4);
 }

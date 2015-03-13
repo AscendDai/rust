@@ -8,6 +8,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![feature(box_syntax)]
 
 enum Foo {
     Foo1(Box<u32>, Box<u32>),
@@ -16,7 +17,7 @@ enum Foo {
 }
 
 fn blah() {
-    let f = &Foo::Foo1(box 1u32, box 2u32);
+    let f = &Foo::Foo1(box 1, box 2);
     match *f {             //~ ERROR cannot move out of
         Foo::Foo1(num1,         //~ NOTE attempting to move value to here
                   num2) => (),  //~ NOTE and here
@@ -44,7 +45,7 @@ fn move_in_match() {
 
 // from issue-8064
 struct A {
-    a: Box<int>,
+    a: Box<isize>,
 }
 
 fn free<T>(_: T) {}

@@ -32,9 +32,11 @@ impl Drop for Handler {
     }
 }
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(any(target_os = "linux",
+          target_os = "macos",
+          target_os = "bitrig",
+          target_os = "openbsd"))]
 mod imp {
-    use core::prelude::*;
     use sys_common::stack;
 
     use super::Handler;
@@ -150,6 +152,7 @@ mod imp {
               all(target_os = "linux", target_arch = "aarch64"),
               all(target_os = "linux", target_arch = "mips"), // may not match
               all(target_os = "linux", target_arch = "mipsel"), // may not match
+              all(target_os = "linux", target_arch = "powerpc"), // may not match
               target_os = "android"))] // may not match
     mod signal {
         use libc;
@@ -161,7 +164,7 @@ mod imp {
 
         pub static SIGSTKSZ: libc::size_t = 8192;
 
-        pub const SIG_DFL: sighandler_t = 0i as sighandler_t;
+        pub const SIG_DFL: sighandler_t = 0 as sighandler_t;
 
         // This definition is not as accurate as it could be, {si_addr} is
         // actually a giant union. Currently we're only interested in that field,
@@ -182,12 +185,12 @@ mod imp {
             sa_restorer: *mut libc::c_void,
         }
 
-        #[cfg(target_word_size = "32")]
+        #[cfg(target_pointer_width = "32")]
         #[repr(C)]
         pub struct sigset_t {
             __val: [libc::c_ulong; 32],
         }
-        #[cfg(target_word_size = "64")]
+        #[cfg(target_pointer_width = "64")]
         #[repr(C)]
         pub struct sigset_t {
             __val: [libc::c_ulong; 16],
@@ -202,7 +205,9 @@ mod imp {
 
     }
 
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos",
+              target_os = "bitrig",
+              target_os = "openbsd"))]
     mod signal {
         use libc;
         use super::sighandler_t;
@@ -211,14 +216,18 @@ mod imp {
         pub const SA_SIGINFO: libc::c_int = 0x0040;
         pub const SIGBUS: libc::c_int = 10;
 
+        #[cfg(target_os = "macos")]
         pub const SIGSTKSZ: libc::size_t = 131072;
+        #[cfg(any(target_os = "bitrig", target_os = "openbsd"))]
+        pub const SIGSTKSZ: libc::size_t = 40960;
 
-        pub const SIG_DFL: sighandler_t = 0i as sighandler_t;
+        pub const SIG_DFL: sighandler_t = 0 as sighandler_t;
 
         pub type sigset_t = u32;
 
         // This structure has more fields, but we're not all that interested in
         // them.
+        #[cfg(target_os = "macos")]
         #[repr(C)]
         pub struct siginfo {
             pub si_signo: libc::c_int,
@@ -227,6 +236,16 @@ mod imp {
             pub pid: libc::pid_t,
             pub uid: libc::uid_t,
             pub status: libc::c_int,
+            pub si_addr: *mut libc::c_void
+        }
+
+        #[cfg(any(target_os = "bitrig", target_os = "openbsd"))]
+        #[repr(C)]
+        pub struct siginfo {
+            pub si_signo: libc::c_int,
+            pub si_code: libc::c_int,
+            pub si_errno: libc::c_int,
+            //union
             pub si_addr: *mut libc::c_void
         }
 
@@ -259,7 +278,9 @@ mod imp {
 }
 
 #[cfg(not(any(target_os = "linux",
-              target_os = "macos")))]
+              target_os = "macos",
+              target_os = "bitrig",
+              target_os = "openbsd")))]
 mod imp {
     use libc;
 
@@ -270,7 +291,7 @@ mod imp {
     }
 
     pub unsafe fn make_handler() -> super::Handler {
-        super::Handler { _data: 0i as *mut libc::c_void }
+        super::Handler { _data: 0 as *mut libc::c_void }
     }
 
     pub unsafe fn drop_handler(_handler: &mut super::Handler) {

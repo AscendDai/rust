@@ -8,19 +8,26 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+// Do not remove on snapshot creation. Needed for bootstrap. (Issue #22364)
+#![cfg_attr(stage0, feature(custom_attribute))]
 #![crate_name = "rustc_borrowck"]
-#![experimental]
+#![unstable(feature = "rustc_private")]
+#![staged_api]
 #![crate_type = "dylib"]
 #![crate_type = "rlib"]
 #![doc(html_logo_url = "http://www.rust-lang.org/logos/rust-logo-128x128-blk-v2.png",
       html_favicon_url = "http://www.rust-lang.org/favicon.ico",
       html_root_url = "http://doc.rust-lang.org/nightly/")]
 
-#![allow(unknown_features)]
-#![feature(quote)]
-#![feature(slicing_syntax, unsafe_destructor)]
-#![feature(rustc_diagnostic_macros)]
 #![allow(non_camel_case_types)]
+
+#![feature(core)]
+#![feature(int_uint)]
+#![feature(quote)]
+#![feature(rustc_diagnostic_macros)]
+#![feature(rustc_private)]
+#![feature(staged_api)]
+#![feature(unsafe_destructor)]
 
 #[macro_use] extern crate log;
 #[macro_use] extern crate syntax;

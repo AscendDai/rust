@@ -20,17 +20,15 @@
 //! Other than that, the implementation is pretty straightforward in terms of
 //! the other two implementations of timers with nothing *that* new showing up.
 
-use self::Req::*;
 use prelude::v1::*;
+use self::Req::*;
 
 use libc;
 use ptr;
 
-use io::IoResult;
-use sync::mpsc::{channel, Sender, Receiver, TryRecvError};
-use sys::c;
-use sys::fs::FileDesc;
+use old_io::IoResult;
 use sys_common::helper_thread::Helper;
+use sync::mpsc::{channel, TryRecvError, Sender, Receiver};
 
 helper_init! { static HELPER: Helper<Req> }
 
@@ -48,8 +46,8 @@ pub enum Req {
     RemoveTimer(libc::HANDLE, Sender<()>),
 }
 
+unsafe impl Send for Timer {}
 unsafe impl Send for Req {}
-
 
 fn helper(input: libc::HANDLE, messages: Receiver<Req>, _: ()) {
     let mut objs = vec![input];
@@ -91,7 +89,7 @@ fn helper(input: libc::HANDLE, messages: Receiver<Req>, _: ()) {
         } else {
             let remove = {
                 match &mut chans[idx as uint - 1] {
-                    &(ref mut c, oneshot) => { c.call(); oneshot }
+                    &mut (ref mut c, oneshot) => { c.call(); oneshot }
                 }
             };
             if remove {

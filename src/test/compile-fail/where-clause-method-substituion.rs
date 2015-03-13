@@ -8,7 +8,9 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-trait Foo<T> {}
+trait Foo<T> {
+    fn dummy(&self, t: T) { }
+}
 
 trait Bar<A> {
     fn method<B>(&self) where A: Foo<B>;
@@ -19,7 +21,7 @@ struct X;
 
 // Remove this impl causing the below resolution to fail // impl Foo<S> for X {}
 
-impl Bar<X> for int {
+impl Bar<X> for isize {
     fn method<U>(&self) where X: Foo<U> {
     }
 }

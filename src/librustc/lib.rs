@@ -14,22 +14,41 @@
 //!
 //! This API is completely unstable and subject to change.
 
+// Do not remove on snapshot creation. Needed for bootstrap. (Issue #22364)
+#![cfg_attr(stage0, feature(custom_attribute))]
 #![crate_name = "rustc"]
-#![experimental]
+#![unstable(feature = "rustc_private")]
+#![staged_api]
 #![crate_type = "dylib"]
 #![crate_type = "rlib"]
 #![doc(html_logo_url = "http://www.rust-lang.org/logos/rust-logo-128x128-blk-v2.png",
       html_favicon_url = "http://www.rust-lang.org/favicon.ico",
       html_root_url = "http://doc.rust-lang.org/nightly/")]
 
-#![allow(unknown_features)]
+#![feature(box_patterns)]
+#![feature(box_syntax)]
+#![feature(collections)]
+#![feature(core)]
+#![feature(hash)]
+#![feature(int_uint)]
+#![feature(old_io)]
+#![feature(libc)]
+#![feature(old_path)]
 #![feature(quote)]
-#![feature(slicing_syntax, unsafe_destructor)]
 #![feature(rustc_diagnostic_macros)]
-#![feature(old_impl_check)]
+#![feature(rustc_private)]
+#![feature(unsafe_destructor)]
+#![feature(staged_api)]
+#![feature(std_misc)]
+#![feature(path)]
+#![feature(io)]
+#![feature(path_ext)]
+#![feature(str_words)]
+#![cfg_attr(test, feature(test))]
 
 extern crate arena;
 extern crate flate;
+extern crate fmt_macros;
 extern crate getopts;
 extern crate graphviz;
 extern crate libc;
@@ -40,6 +59,7 @@ extern crate rbml;
 extern crate collections;
 #[macro_use] extern crate log;
 #[macro_use] extern crate syntax;
+#[macro_use] #[no_link] extern crate rustc_bitflags;
 
 extern crate "serialize" as rustc_serialize; // used by deriving
 
@@ -48,7 +68,9 @@ extern crate test;
 
 pub use rustc_llvm as llvm;
 
-mod diagnostics;
+// NB: This module needs to be declared first so diagnostics are
+// registered before they are used.
+pub mod diagnostics;
 
 pub mod back {
     pub use rustc_back::abi;
@@ -72,7 +94,6 @@ pub mod middle {
     pub mod check_loop;
     pub mod check_match;
     pub mod check_rvalues;
-    pub mod check_static;
     pub mod const_eval;
     pub mod dataflow;
     pub mod dead;
@@ -125,8 +146,6 @@ pub mod util {
 pub mod lib {
     pub use llvm;
 }
-
-__build_diagnostic_array! { DIAGNOSTICS }
 
 // A private module so that macro-expanded idents like
 // `::rustc::lint::Lint` will also work in `rustc` itself.

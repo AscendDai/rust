@@ -10,11 +10,13 @@
 
 // Test method calls with self as an argument
 
+#![allow(unknown_features)]
+#![feature(box_syntax)]
+
 static mut COUNT: u64 = 1;
 
+#[derive(Copy)]
 struct Foo;
-
-impl Copy for Foo {}
 
 trait Bar : Sized {
     fn foo1(&self);
@@ -73,5 +75,5 @@ fn main() {
 
     x.baz();
 
-    unsafe { assert!(COUNT == 2u64*2*3*3*5*5*7*7*11*11*13*13*17); }
+    unsafe { assert!(COUNT == 2*2*3*3*5*5*7*7*11*11*13*13*17); }
 }

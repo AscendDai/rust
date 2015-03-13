@@ -38,7 +38,7 @@ pub struct SCTable {
     rename_memo: RefCell<HashMap<(SyntaxContext,Ident,Name),SyntaxContext>>,
 }
 
-#[derive(PartialEq, RustcEncodable, RustcDecodable, Hash, Show, Copy)]
+#[derive(PartialEq, RustcEncodable, RustcDecodable, Hash, Debug, Copy)]
 pub enum SyntaxContext_ {
     EmptyCtxt,
     Mark (Mrk,SyntaxContext),
@@ -187,7 +187,7 @@ fn resolve_internal(id: Ident,
     }
 
     let resolved = {
-        let result = (*table.table.borrow())[id.ctxt as uint];
+        let result = (*table.table.borrow())[id.ctxt as usize];
         match result {
             EmptyCtxt => id.name,
             // ignore marks here:
@@ -223,7 +223,7 @@ pub fn marksof(ctxt: SyntaxContext, stopname: Name) -> Vec<Mrk> {
 }
 
 // the internal function for computing marks
-// it's not clear to me whether it's better to use a .index(&FullRange) mutable
+// it's not clear to me whether it's better to use a [] mutable
 // vector or a cons-list for this.
 fn marksof_internal(ctxt: SyntaxContext,
                     stopname: Name,
@@ -231,7 +231,7 @@ fn marksof_internal(ctxt: SyntaxContext,
     let mut result = Vec::new();
     let mut loopvar = ctxt;
     loop {
-        let table_entry = (*table.table.borrow())[loopvar as uint];
+        let table_entry = (*table.table.borrow())[loopvar as usize];
         match table_entry {
             EmptyCtxt => {
                 return result;
@@ -258,7 +258,7 @@ fn marksof_internal(ctxt: SyntaxContext,
 /// FAILS when outside is not a mark.
 pub fn outer_mark(ctxt: SyntaxContext) -> Mrk {
     with_sctable(|sctable| {
-        match (*sctable.table.borrow())[ctxt as uint] {
+        match (*sctable.table.borrow())[ctxt as usize] {
             Mark(mrk, _) => mrk,
             _ => panic!("can't retrieve outer mark when outside is not a mark")
         }
@@ -288,19 +288,19 @@ mod tests {
     fn xorpush_test () {
         let mut s = Vec::new();
         xor_push(&mut s, 14);
-        assert_eq!(s.clone(), vec!(14));
+        assert_eq!(s.clone(), [14]);
         xor_push(&mut s, 14);
-        assert_eq!(s.clone(), Vec::new());
+        assert_eq!(s.clone(), []);
         xor_push(&mut s, 14);
-        assert_eq!(s.clone(), vec!(14));
+        assert_eq!(s.clone(), [14]);
         xor_push(&mut s, 15);
-        assert_eq!(s.clone(), vec!(14, 15));
+        assert_eq!(s.clone(), [14, 15]);
         xor_push(&mut s, 16);
-        assert_eq!(s.clone(), vec!(14, 15, 16));
+        assert_eq!(s.clone(), [14, 15, 16]);
         xor_push(&mut s, 16);
-        assert_eq!(s.clone(), vec!(14, 15));
+        assert_eq!(s.clone(), [14, 15]);
         xor_push(&mut s, 15);
-        assert_eq!(s.clone(), vec!(14));
+        assert_eq!(s.clone(), [14]);
     }
 
     fn id(n: u32, s: SyntaxContext) -> Ident {
@@ -309,7 +309,7 @@ mod tests {
 
     // because of the SCTable, I now need a tidy way of
     // creating syntax objects. Sigh.
-    #[derive(Clone, PartialEq, Show)]
+    #[derive(Clone, PartialEq, Debug)]
     enum TestSC {
         M(Mrk),
         R(Ident,Name)
@@ -330,7 +330,7 @@ mod tests {
         let mut result = Vec::new();
         loop {
             let table = table.table.borrow();
-            match (*table)[sc as uint] {
+            match (*table)[sc as usize] {
                 EmptyCtxt => {return result;},
                 Mark(mrk,tail) => {
                     result.push(M(mrk));
@@ -389,29 +389,29 @@ mod tests {
         assert_eq!(marksof_internal (EMPTY_CTXT,stopname,&t),Vec::new());
         // FIXME #5074: ANF'd to dodge nested calls
         { let ans = unfold_marks(vec!(4,98),EMPTY_CTXT,&mut t);
-         assert_eq! (marksof_internal (ans,stopname,&t),vec!(4,98));}
+         assert_eq! (marksof_internal (ans,stopname,&t), [4, 98]);}
         // does xoring work?
         { let ans = unfold_marks(vec!(5,5,16),EMPTY_CTXT,&mut t);
-         assert_eq! (marksof_internal (ans,stopname,&t), vec!(16));}
+         assert_eq! (marksof_internal (ans,stopname,&t), [16]);}
         // does nested xoring work?
         { let ans = unfold_marks(vec!(5,10,10,5,16),EMPTY_CTXT,&mut t);
-         assert_eq! (marksof_internal (ans, stopname,&t), vec!(16));}
+         assert_eq! (marksof_internal (ans, stopname,&t), [16]);}
         // rename where stop doesn't match:
         { let chain = vec!(M(9),
-                        R(id(name1.uint() as u32,
+                        R(id(name1.usize() as u32,
                              apply_mark_internal (4, EMPTY_CTXT,&mut t)),
                           Name(100101102)),
                         M(14));
          let ans = unfold_test_sc(chain,EMPTY_CTXT,&mut t);
-         assert_eq! (marksof_internal (ans, stopname, &t), vec!(9,14));}
+         assert_eq! (marksof_internal (ans, stopname, &t), [9, 14]);}
         // rename where stop does match
         { let name1sc = apply_mark_internal(4, EMPTY_CTXT, &mut t);
          let chain = vec!(M(9),
-                       R(id(name1.uint() as u32, name1sc),
+                       R(id(name1.usize() as u32, name1sc),
                          stopname),
                        M(14));
          let ans = unfold_test_sc(chain,EMPTY_CTXT,&mut t);
-         assert_eq! (marksof_internal (ans, stopname, &t), vec!(9)); }
+         assert_eq! (marksof_internal (ans, stopname, &t), [9]); }
     }
 
 

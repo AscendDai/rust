@@ -8,6 +8,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![allow(unknown_features)]
+#![feature(box_syntax)]
 
 // Example from lkuper's intern talk, August 2012.
 use Color::{cyan, magenta, yellow, black};
@@ -17,10 +19,8 @@ trait Equal {
     fn isEq(&self, a: &Self) -> bool;
 }
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 enum Color { cyan, magenta, yellow, black }
-
-impl Copy for Color {}
 
 impl Equal for Color {
     fn isEq(&self, a: &Color) -> bool {

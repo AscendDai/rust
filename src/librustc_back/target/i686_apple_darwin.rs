@@ -12,6 +12,7 @@ use target::Target;
 
 pub fn target() -> Target {
     let mut base = super::apple_base::opts();
+    base.cpu = "yonah".to_string();
     base.pre_link_args.push("-m32".to_string());
 
     Target {
@@ -22,7 +23,7 @@ pub fn target() -> Target {
                       -n8:16:32".to_string(),
         llvm_target: "i686-apple-darwin".to_string(),
         target_endian: "little".to_string(),
-        target_word_size: "32".to_string(),
+        target_pointer_width: "32".to_string(),
         arch: "x86".to_string(),
         target_os: "macos".to_string(),
         options: base,

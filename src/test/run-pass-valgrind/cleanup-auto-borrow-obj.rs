@@ -13,6 +13,7 @@
 // schedule cleanups when auto borrowing trait objects.
 // This program should be valgrind clean.
 
+#![feature(box_syntax)]
 
 static mut DROP_RAN: bool = false;
 
@@ -24,7 +25,7 @@ impl Drop for Foo {
 }
 
 
-trait Trait {}
+trait Trait { fn dummy(&self) { } }
 impl Trait for Foo {}
 
 pub fn main() {

@@ -10,10 +10,13 @@
 
 // Test mutability and slicing syntax.
 
-#![feature(slicing_syntax)]
-
 fn main() {
-    let x: &[int] = &[1, 2, 3, 4, 5];
+    let x: &[isize] = &[1, 2, 3, 4, 5];
     // Immutable slices are not mutable.
-    let y: &mut[_] = &x[2..4]; //~ ERROR cannot borrow immutable dereference of `&`-pointer as mutab
+
+    let y: &mut[_] = &x[2..4];
+    //~^ ERROR mismatched types
+    //~| expected `&mut [_]`
+    //~| found `&[isize]`
+    //~| values differ in mutability
 }

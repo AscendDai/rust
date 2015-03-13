@@ -8,8 +8,12 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![allow(unknown_features)]
+#![feature(box_patterns)]
+#![feature(box_syntax)]
+
 pub fn main() {
-    match box 100i {
+    match box 100 {
       box x => {
         println!("{}", x);
         assert_eq!(x, 100);

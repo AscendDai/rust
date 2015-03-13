@@ -9,6 +9,9 @@
 // except according to those terms.
 
 
+#![allow(unknown_features)]
+#![feature(box_syntax)]
+
 trait Foo {
     fn foo(&self) -> String;
 }
@@ -26,6 +29,6 @@ impl Foo for uint {
 }
 
 pub fn main() {
-    let x = box 3u;
+    let x: Box<_> = box 3;
     assert_eq!(x.foo(), "box 3".to_string());
 }

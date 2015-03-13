@@ -8,6 +8,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![feature(box_patterns)]
+#![feature(box_syntax)]
 
 struct HTMLImageData {
     image: Option<String>

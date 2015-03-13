@@ -121,37 +121,6 @@ pub unsafe fn record_os_managed_stack_bounds(stack_lo: uint, _stack_hi: uint) {
     record_sp_limit(stack_lo + RED_ZONE);
 }
 
-#[inline(always)]
-pub unsafe fn record_rust_managed_stack_bounds(stack_lo: uint, stack_hi: uint) {
-    // When the old runtime had segmented stacks, it used a calculation that was
-    // "limit + RED_ZONE + FUDGE". The red zone was for things like dynamic
-    // symbol resolution, llvm function calls, etc. In theory this red zone
-    // value is 0, but it matters far less when we have gigantic stacks because
-    // we don't need to be so exact about our stack budget. The "fudge factor"
-    // was because LLVM doesn't emit a stack check for functions < 256 bytes in
-    // size. Again though, we have giant stacks, so we round all these
-    // calculations up to the nice round number of 20k.
-    record_sp_limit(stack_lo + RED_ZONE);
-
-    return target_record_stack_bounds(stack_lo, stack_hi);
-
-    #[cfg(not(windows))] #[inline(always)]
-    unsafe fn target_record_stack_bounds(_stack_lo: uint, _stack_hi: uint) {}
-
-    #[cfg(all(windows, target_arch = "x86"))] #[inline(always)]
-    unsafe fn target_record_stack_bounds(stack_lo: uint, stack_hi: uint) {
-        // stack range is at TIB: %fs:0x04 (top) and %fs:0x08 (bottom)
-        asm!("mov $0, %fs:0x04" :: "r"(stack_hi) :: "volatile");
-        asm!("mov $0, %fs:0x08" :: "r"(stack_lo) :: "volatile");
-    }
-    #[cfg(all(windows, target_arch = "x86_64"))] #[inline(always)]
-    unsafe fn target_record_stack_bounds(stack_lo: uint, stack_hi: uint) {
-        // stack range is at TIB: %gs:0x08 (top) and %gs:0x10 (bottom)
-        asm!("mov $0, %gs:0x08" :: "r"(stack_hi) :: "volatile");
-        asm!("mov $0, %gs:0x10" :: "r"(stack_lo) :: "volatile");
-    }
-}
-
 /// Records the current limit of the stack as specified by `end`.
 ///
 /// This is stored in an OS-dependent location, likely inside of the thread
@@ -189,7 +158,8 @@ pub unsafe fn record_sp_limit(limit: uint) {
     unsafe fn target_record_sp_limit(limit: uint) {
         asm!("movq $0, %fs:24" :: "r"(limit) :: "volatile")
     }
-    #[cfg(all(target_arch = "x86_64", target_os = "dragonfly"))] #[inline(always)]
+    #[cfg(all(target_arch = "x86_64", target_os = "dragonfly"))]
+    #[inline(always)]
     unsafe fn target_record_sp_limit(limit: uint) {
         asm!("movq $0, %fs:32" :: "r"(limit) :: "volatile")
     }
@@ -227,12 +197,14 @@ pub unsafe fn record_sp_limit(limit: uint) {
     }
 
     // aarch64 - FIXME(AARCH64): missing...
-    #[cfg(target_arch = "aarch64")]
-    unsafe fn target_record_sp_limit(_: uint) {
-    }
-
-    // iOS segmented stack is disabled for now, see related notes
-    #[cfg(all(target_arch = "arm", target_os = "ios"))] #[inline(always)]
+    // powerpc - FIXME(POWERPC): missing...
+    // arm-ios - iOS segmented stack is disabled for now, see related notes
+    // openbsd - segmented stack is disabled
+    #[cfg(any(target_arch = "aarch64",
+              target_arch = "powerpc",
+              all(target_arch = "arm", target_os = "ios"),
+              target_os = "bitrig",
+              target_os = "openbsd"))]
     unsafe fn target_record_sp_limit(_: uint) {
     }
 }
@@ -275,13 +247,13 @@ pub unsafe fn get_sp_limit() -> uint {
         asm!("movq %fs:24, $0" : "=r"(limit) ::: "volatile");
         return limit;
     }
-    #[cfg(all(target_arch = "x86_64", target_os = "dragonfly"))] #[inline(always)]
+    #[cfg(all(target_arch = "x86_64", target_os = "dragonfly"))]
+    #[inline(always)]
     unsafe fn target_get_sp_limit() -> uint {
         let limit;
         asm!("movq %fs:32, $0" : "=r"(limit) ::: "volatile");
         return limit;
     }
-
 
     // x86
     #[cfg(all(target_arch = "x86",
@@ -321,15 +293,18 @@ pub unsafe fn get_sp_limit() -> uint {
     }
 
     // aarch64 - FIXME(AARCH64): missing...
-    #[cfg(target_arch = "aarch64")]
-    unsafe fn target_get_sp_limit() -> uint {
-        1024
-    }
-
-    // iOS doesn't support segmented stacks yet. This function might
-    // be called by runtime though so it is unsafe to mark it as
-    // unreachable, let's return a fixed constant.
-    #[cfg(all(target_arch = "arm", target_os = "ios"))] #[inline(always)]
+    // powerpc - FIXME(POWERPC): missing...
+    // arm-ios - iOS doesn't support segmented stacks yet.
+    // openbsd - OpenBSD doesn't support segmented stacks.
+    //
+    // This function might be called by runtime though
+    // so it is unsafe to unreachable, let's return a fixed constant.
+    #[cfg(any(target_arch = "aarch64",
+              target_arch = "powerpc",
+              all(target_arch = "arm", target_os = "ios"),
+              target_os = "bitrig",
+              target_os = "openbsd"))]
+    #[inline(always)]
     unsafe fn target_get_sp_limit() -> uint {
         1024
     }

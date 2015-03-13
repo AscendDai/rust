@@ -36,10 +36,11 @@
 //!   implementation changes (using a special thread-local heap, for example).
 //!   Moreover, a switch to, e.g. `P<'a, T>` would be easy and mostly automated.
 
-use std::fmt::{self, Show};
-use std::hash::Hash;
+use std::fmt::{self, Display, Debug};
+use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 use std::ptr;
+
 use serialize::{Encodable, Decodable, Encoder, Decoder};
 
 /// An owned smart pointer.
@@ -99,14 +100,19 @@ impl<T: PartialEq> PartialEq for P<T> {
 
 impl<T: Eq> Eq for P<T> {}
 
-impl<T: Show> Show for P<T> {
+impl<T: Debug> Debug for P<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        (**self).fmt(f)
+        Debug::fmt(&**self, f)
+    }
+}
+impl<T: Display> Display for P<T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        Display::fmt(&**self, f)
     }
 }
 
-impl<S, T: Hash<S>> Hash<S> for P<T> {
-    fn hash(&self, state: &mut S) {
+impl<T: Hash> Hash for P<T> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
         (**self).hash(state);
     }
 }

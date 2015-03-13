@@ -12,13 +12,14 @@ use target::Target;
 
 pub fn target() -> Target {
     let mut base = super::linux_base::opts();
+    base.cpu = "pentium4".to_string();
     base.pre_link_args.push("-m32".to_string());
 
     Target {
         data_layout: "e-p:32:32-f64:32:64-i64:32:64-f80:32:32-n8:16:32".to_string(),
         llvm_target: "i686-unknown-linux-gnu".to_string(),
         target_endian: "little".to_string(),
-        target_word_size: "32".to_string(),
+        target_pointer_width: "32".to_string(),
         arch: "x86".to_string(),
         target_os: "linux".to_string(),
         options: base,

@@ -10,20 +10,17 @@
 
 // aux-build:macro_crate_test.rs
 // ignore-stage1
-// ignore-android
 // error-pattern: unknown start of token: \u{0}
 
 // Issue #15750 and #15962 : this test is checking that the standard
 // parser rejects embedded idents.  pnkfelix did not want to attempt
 // to make a test file that itself used the embedded ident input form,
-// since he worrid that would be difficult to work with in many text
+// since he worried that would be difficult to work with in many text
 // editors, so instead he made a macro that expands into the embedded
 // ident form.
 
 #![feature(plugin)]
-
-#[plugin] #[no_link]
-extern crate macro_crate_test;
+#![plugin(macro_crate_test)]
 
 fn main() {
     let x = 0;

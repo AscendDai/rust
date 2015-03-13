@@ -46,7 +46,7 @@ fn test() {
                  v1[1] == 32001u16 &&
                  v1[2] == 0u16));
         copy_memory(v1.as_mut_ptr().offset(2),
-                    v0.as_ptr(), 1u);
+                    v0.as_ptr(), 1);
         assert!((v1[0] == 32002u16 &&
                  v1[1] == 32001u16 &&
                  v1[2] == 32000u16));
@@ -84,7 +84,7 @@ fn test_as_ref() {
         assert_eq!(q.as_ref().unwrap(), &2);
 
         // Lifetime inference
-        let u = 2i;
+        let u = 2;
         {
             let p: *const int = &u as *const _;
             assert_eq!(p.as_ref().unwrap(), &2);
@@ -102,7 +102,7 @@ fn test_as_mut() {
         assert!(q.as_mut().unwrap() == &mut 2);
 
         // Lifetime inference
-        let mut u = 2i;
+        let mut u = 2;
         {
             let p: *mut int = &mut u as *mut _;
             assert!(p.as_mut().unwrap() == &mut 2);
@@ -113,7 +113,7 @@ fn test_as_mut() {
 #[test]
 fn test_ptr_addition() {
     unsafe {
-        let xs = repeat(5i).take(16).collect::<Vec<_>>();
+        let xs = repeat(5).take(16).collect::<Vec<_>>();
         let mut ptr = xs.as_ptr();
         let end = ptr.offset(16);
 
@@ -131,7 +131,7 @@ fn test_ptr_addition() {
             m_ptr = m_ptr.offset(1);
         }
 
-        assert!(xs_mut == repeat(10i).take(16).collect::<Vec<_>>());
+        assert!(xs_mut == repeat(10).take(16).collect::<Vec<_>>());
     }
 }
 
@@ -139,12 +139,12 @@ fn test_ptr_addition() {
 fn test_ptr_subtraction() {
     unsafe {
         let xs = vec![0,1,2,3,4,5,6,7,8,9];
-        let mut idx = 9i8;
+        let mut idx = 9;
         let ptr = xs.as_ptr();
 
-        while idx >= 0i8 {
+        while idx >= 0 {
             assert_eq!(*(ptr.offset(idx as int)), idx as int);
-            idx = idx - 1i8;
+            idx = idx - 1;
         }
 
         let mut xs_mut = xs;
@@ -156,7 +156,7 @@ fn test_ptr_subtraction() {
             m_ptr = m_ptr.offset(-1);
         }
 
-        assert!(xs_mut == vec![0,2,4,6,8,10,12,14,16,18]);
+        assert_eq!(xs_mut, [0,2,4,6,8,10,12,14,16,18]);
     }
 }
 
@@ -166,4 +166,13 @@ fn test_set_memory() {
     let ptr = xs.as_mut_ptr();
     unsafe { set_memory(ptr, 5u8, xs.len()); }
     assert!(xs == [5u8; 20]);
+}
+
+#[test]
+fn test_unsized_unique() {
+    let xs: &mut [_] = &mut [1, 2, 3];
+    let ptr = unsafe { Unique::new(xs as *mut [_]) };
+    let ys = unsafe { &mut **ptr };
+    let zs: &mut [_] = &mut [1, 2, 3];
+    assert!(ys == zs);
 }

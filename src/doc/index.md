@@ -9,10 +9,11 @@ If you haven't seen Rust at all yet, the first thing you should read is the [30
 minute intro](intro.html). It will give you an overview of the basic ideas of Rust
 at a high level.
 
-Once you know you really want to learn Rust, the next step is reading [the
-guide](guide.html). It is a lengthy explanation of Rust, its syntax, and its
-concepts. Upon completing the guide, you'll be an intermediate Rust developer,
-and will have a good grasp of the fundamental ideas behind Rust.
+Once you know you really want to learn Rust, the next step is reading [The
+Rust Programming Language](book/index.html). It is a lengthy explanation of
+Rust, its syntax, and its concepts. Upon completing the book, you'll be an
+intermediate Rust developer, and will have a good grasp of the fundamental
+ideas behind Rust.
 
 # Community & Getting Help
 
@@ -38,33 +39,17 @@ Overflow](http://stackoverflow.com/questions/tagged/rust). Searching for your
 problem might reveal someone who has asked it before!
 
 There is an active [subreddit](http://reddit.com/r/rust) with lots of
-discussion about Rust.
+discussion and news about Rust.
 
-There is also a [developer forum](http://discuss.rust-lang.org/), where the
-development of Rust itself is discussed.
+There is also a [user forum](http://users.rust-lang.org), for all
+user-oriented discussion, and a [developer
+forum](http://internals.rust-lang.org/), where the development of Rust
+itself is discussed.
 
 # Specification
 
 Rust does not have an exact specification, but an effort to describe as much of
 the language in as much detail as possible is in [the reference](reference.html).
-
-# Guides
-
-Rust Guides are in-depth looks at a particular topic that's relevant to Rust
-development. If you're trying to figure out how to do something, there may be
-a guide that can help you out:
-
-* [Ownership](guide-ownership.html)
-* [Strings](guide-strings.html)
-* [Pointers](guide-pointers.html)
-* [Crates and modules](guide-crates.html)
-* [Threads and Communication](guide-tasks.html)
-* [Error Handling](guide-error-handling.html)
-* [Foreign Function Interface](guide-ffi.html)
-* [Writing Unsafe and Low-Level Code](guide-unsafe.html)
-* [Macros](guide-macros.html)
-* [Testing](guide-testing.html)
-* [Compiler Plugins](guide-plugin.html)
 
 # Tools
 
@@ -74,8 +59,7 @@ tools we have are really nice.
 [Cargo](http://crates.io) is Rust's package manager, and its website contains
 lots of good documentation.
 
-[The `rustdoc` manual](rustdoc.html) contains information about Rust's
-documentation tool.
+[`rustdoc`](book/documentation.html) is used to generate documentation for Rust code.
 
 # FAQs
 
@@ -84,7 +68,7 @@ There are questions that are asked quite often, and so we've made FAQs for them:
 * [Language Design FAQ](complement-design-faq.html)
 * [Language FAQ](complement-lang-faq.html)
 * [Project FAQ](complement-project-faq.html)
-* [How to submit a bug report](complement-bugreport.html)
+* [How to submit a bug report](https://github.com/rust-lang/rust/blob/master/CONTRIBUTING.md#bug-reports)
 
 # The standard library
 

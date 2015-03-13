@@ -57,7 +57,7 @@ impl Rand for Exp1 {
 /// This distribution has density function: `f(x) = lambda *
 /// exp(-lambda * x)` for `x > 0`.
 ///
-/// # Example
+/// # Examples
 ///
 /// ```rust
 /// use std::rand;
@@ -103,18 +103,18 @@ mod test {
     fn test_exp() {
         let mut exp = Exp::new(10.0);
         let mut rng = ::test::rng();
-        for _ in range(0u, 1000) {
+        for _ in 0..1000 {
             assert!(exp.sample(&mut rng) >= 0.0);
             assert!(exp.ind_sample(&mut rng) >= 0.0);
         }
     }
     #[test]
-    #[should_fail]
+    #[should_panic]
     fn test_exp_invalid_lambda_zero() {
         Exp::new(0.0);
     }
     #[test]
-    #[should_fail]
+    #[should_panic]
     fn test_exp_invalid_lambda_neg() {
         Exp::new(-10.0);
     }
@@ -137,7 +137,7 @@ mod bench {
         let mut exp = Exp::new(2.71828 * 3.14159);
 
         b.iter(|| {
-            for _ in range(0, ::RAND_BENCH_N) {
+            for _ in 0..::RAND_BENCH_N {
                 exp.sample(&mut rng);
             }
         });

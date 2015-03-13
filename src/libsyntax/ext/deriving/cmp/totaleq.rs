@@ -32,7 +32,8 @@ pub fn expand_deriving_totaleq<F>(cx: &mut ExtCtxt,
             let block = cx.block(span, stmts, None);
             cx.expr_block(block)
         },
-                       box |cx, sp, _, _| cx.span_bug(sp, "non matching enums in deriving(Eq)?"),
+                       Box::new(|cx, sp, _, _| {
+                           cx.span_bug(sp, "non matching enums in derive(Eq)?") }),
                        cx,
                        span,
                        substr)
@@ -46,7 +47,7 @@ pub fn expand_deriving_totaleq<F>(cx: &mut ExtCtxt,
     let trait_def = TraitDef {
         span: span,
         attributes: Vec::new(),
-        path: Path::new(vec!("std", "cmp", "Eq")),
+        path: path_std!(cx, core::cmp::Eq),
         additional_bounds: Vec::new(),
         generics: LifetimeBounds::empty(),
         methods: vec!(
@@ -57,11 +58,12 @@ pub fn expand_deriving_totaleq<F>(cx: &mut ExtCtxt,
                 args: vec!(),
                 ret_ty: nil_ty(),
                 attributes: attrs,
-                combine_substructure: combine_substructure(box |a, b, c| {
+                combine_substructure: combine_substructure(Box::new(|a, b, c| {
                     cs_total_eq_assert(a, b, c)
-                })
+                }))
             }
-        )
+        ),
+        associated_types: Vec::new(),
     };
     trait_def.expand(cx, mitem, item, push)
 }

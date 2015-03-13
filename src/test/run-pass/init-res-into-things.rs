@@ -8,6 +8,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![allow(unknown_features)]
+#![feature(box_syntax)]
 #![feature(unsafe_destructor)]
 
 use std::cell::Cell;
@@ -35,7 +37,7 @@ fn r(i: &Cell<int>) -> r {
 }
 
 fn test_rec() {
-    let i = &Cell::new(0i);
+    let i = &Cell::new(0);
     {
         let _a = BoxR {x: r(i)};
     }
@@ -47,7 +49,7 @@ fn test_tag() {
         t0(r<'a>),
     }
 
-    let i = &Cell::new(0i);
+    let i = &Cell::new(0);
     {
         let _a = t::t0(r(i));
     }
@@ -55,25 +57,25 @@ fn test_tag() {
 }
 
 fn test_tup() {
-    let i = &Cell::new(0i);
+    let i = &Cell::new(0);
     {
-        let _a = (r(i), 0i);
+        let _a = (r(i), 0);
     }
     assert_eq!(i.get(), 1);
 }
 
 fn test_unique() {
-    let i = &Cell::new(0i);
+    let i = &Cell::new(0);
     {
-        let _a = box r(i);
+        let _a: Box<_> = box r(i);
     }
     assert_eq!(i.get(), 1);
 }
 
 fn test_unique_rec() {
-    let i = &Cell::new(0i);
+    let i = &Cell::new(0);
     {
-        let _a = box BoxR {
+        let _a: Box<_> = box BoxR {
             x: r(i)
         };
     }

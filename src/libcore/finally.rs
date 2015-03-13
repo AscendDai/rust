@@ -16,23 +16,27 @@
 //! "finally" case. For advanced cases, the `try_finally` function can
 //! also be used. See that function for more details.
 //!
-//! # Example
+//! # Examples
 //!
 //! ```
 //! # #![feature(unboxed_closures)]
 //!
 //! use std::finally::Finally;
 //!
-//! # fn main() {
-//! (|&mut:| {
+//! (|| {
 //!     // ...
 //! }).finally(|| {
 //!     // this code is always run
 //! })
-//! # }
 //! ```
 
-#![experimental]
+#![unstable(feature = "core")]
+#![deprecated(since = "1.0.0",
+              reason = "It is unclear if this module is more robust than implementing \
+                        Drop on a custom type, and this module is being removed with no \
+                        replacement. Use a custom Drop implementation to regain existing \
+                        functionality.")]
+#![allow(deprecated)]
 
 use ops::{Drop, FnMut, FnOnce};
 
@@ -63,12 +67,12 @@ impl<T, F> Finally<T> for F where F: FnMut() -> T {
 /// function could have panicked at any point, so the values of the shared
 /// state may be inconsistent.
 ///
-/// # Example
+/// # Examples
 ///
 /// ```
 /// use std::finally::try_finally;
 ///
-/// struct State<'a> { buffer: &'a mut [u8], len: uint }
+/// struct State<'a> { buffer: &'a mut [u8], len: usize }
 /// # let mut buf = [];
 /// let mut state = State { buffer: &mut buf, len: 0 };
 /// try_finally(

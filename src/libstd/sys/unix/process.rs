@@ -1,4 +1,4 @@
-// Copyright 2014 The Rust Project Developers. See the COPYRIGHT
+// Copyright 2014-2015 The Rust Project Developers. See the COPYRIGHT
 // file at the top-level directory of this distribution and at
 // http://rust-lang.org/COPYRIGHT.
 //
@@ -8,18 +8,20 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![allow(deprecated)]
+
 use prelude::v1::*;
 use self::Req::*;
 
-use collections;
+use collections::HashMap;
 use ffi::CString;
 use hash::Hash;
-use io::process::{ProcessExit, ExitStatus, ExitSignal};
-use io::{self, IoResult, IoError, EndOfFile};
+use old_io::process::{ProcessExit, ExitStatus, ExitSignal};
+use old_io::{IoResult, EndOfFile};
 use libc::{self, pid_t, c_void, c_int};
 use mem;
 use os;
-use path::BytesContainer;
+use old_path::BytesContainer;
 use ptr;
 use sync::mpsc::{channel, Sender, Receiver};
 use sys::fs::FileDesc;
@@ -63,7 +65,6 @@ impl Process {
               K: BytesContainer + Eq + Hash, V: BytesContainer
     {
         use libc::funcs::posix88::unistd::{fork, dup2, close, chdir, execvp};
-        use libc::funcs::bsd44::getdtablesize;
 
         mod rustrt {
             extern {
@@ -71,21 +72,18 @@ impl Process {
             }
         }
 
-        #[cfg(target_os = "macos")]
-        unsafe fn set_environ(envp: *const c_void) {
-            extern { fn _NSGetEnviron() -> *mut *const c_void; }
-
-            *_NSGetEnviron() = envp;
-        }
-        #[cfg(not(target_os = "macos"))]
-        unsafe fn set_environ(envp: *const c_void) {
-            extern { static mut environ: *const c_void; }
-            environ = envp;
-        }
-
         unsafe fn set_cloexec(fd: c_int) {
             let ret = c::ioctl(fd, c::FIOCLEX);
             assert_eq!(ret, 0);
+        }
+
+        #[cfg(all(target_os = "android", target_arch = "aarch64"))]
+        unsafe fn getdtablesize() -> c_int {
+            libc::sysconf(libc::consts::os::sysconf::_SC_OPEN_MAX) as c_int
+        }
+        #[cfg(not(all(target_os = "android", target_arch = "aarch64")))]
+        unsafe fn getdtablesize() -> c_int {
+            libc::funcs::bsd44::getdtablesize()
         }
 
         let dirp = cfg.cwd().map(|c| c.as_ptr()).unwrap_or(ptr::null());
@@ -95,8 +93,8 @@ impl Process {
             mem::transmute::<&ProcessConfig<K,V>,&'static ProcessConfig<K,V>>(cfg)
         };
 
-        with_envp(cfg.env(), move|: envp: *const c_void| {
-            with_argv(cfg.program(), cfg.args(), move|: argv: *const *const libc::c_char| unsafe {
+        with_envp(cfg.env(), move|envp: *const c_void| {
+            with_argv(cfg.program(), cfg.args(), move|argv: *const *const libc::c_char| unsafe {
                 let (input, mut output) = try!(sys::os::pipe());
 
                 // We may use this in the child, so perform allocations before the
@@ -124,9 +122,9 @@ impl Process {
                     let mut bytes = [0; 8];
                     return match input.read(&mut bytes) {
                         Ok(8) => {
-                            assert!(combine(CLOEXEC_MSG_FOOTER) == combine(bytes.slice(4, 8)),
+                            assert!(combine(CLOEXEC_MSG_FOOTER) == combine(&bytes[4.. 8]),
                                 "Validation on the CLOEXEC pipe failed: {:?}", bytes);
-                            let errno = combine(bytes.slice(0, 4));
+                            let errno = combine(&bytes[0.. 4]);
                             assert!(p.wait(0).is_ok(), "wait(0) should either return Ok or panic");
                             Err(super::decode_error(errno))
                         }
@@ -196,7 +194,7 @@ impl Process {
                 // up /dev/null into that file descriptor. Otherwise, the first file
                 // descriptor opened up in the child would be numbered as one of the
                 // stdio file descriptors, which is likely to wreak havoc.
-                let setup = |&: src: Option<P>, dst: c_int| {
+                let setup = |src: Option<P>, dst: c_int| {
                     let src = match src {
                         None => {
                             let flags = if dst == libc::STDIN_FILENO {
@@ -223,7 +221,7 @@ impl Process {
                 if !setup(err_fd, libc::STDERR_FILENO) { fail(&mut output) }
 
                 // close all other fds
-                for fd in range(3, getdtablesize()).rev() {
+                for fd in (3..getdtablesize()).rev() {
                     if fd != output.fd() {
                         let _ = close(fd as c_int);
                     }
@@ -250,7 +248,7 @@ impl Process {
                             fn setgroups(ngroups: libc::c_int,
                                          ptr: *const libc::c_void) -> libc::c_int;
                         }
-                        let _ = setgroups(0, 0 as *const libc::c_void);
+                        let _ = setgroups(0, ptr::null());
 
                         if libc::setuid(u as libc::uid_t) != 0 {
                             fail(&mut output);
@@ -268,7 +266,7 @@ impl Process {
                     fail(&mut output);
                 }
                 if !envp.is_null() {
-                    set_environ(envp);
+                    *sys::os::environ() = envp as *const _;
                 }
                 let _ = execvp(*argv, argv as *mut _);
                 fail(&mut output);
@@ -328,7 +326,7 @@ impl Process {
         // The actual communication between the helper thread and this thread is
         // quite simple, just a channel moving data around.
 
-        unsafe { HELPER.boot(register_sigchld, waitpid_helper) }
+        HELPER.boot(register_sigchld, waitpid_helper);
 
         match self.try_wait() {
             Some(ret) => return Ok(ret),
@@ -336,7 +334,7 @@ impl Process {
         }
 
         let (tx, rx) = channel();
-        unsafe { HELPER.send(NewChild(self.pid, tx, deadline)); }
+        HELPER.send(NewChild(self.pid, tx, deadline));
         return match rx.recv() {
             Ok(e) => Ok(e),
             Err(..) => Err(timeout("wait timed out")),
@@ -351,8 +349,8 @@ impl Process {
             unsafe {
                 let mut pipes = [0; 2];
                 assert_eq!(libc::pipe(pipes.as_mut_ptr()), 0);
-                set_nonblocking(pipes[0], true).ok().unwrap();
-                set_nonblocking(pipes[1], true).ok().unwrap();
+                set_nonblocking(pipes[0], true);
+                set_nonblocking(pipes[1], true);
                 WRITE_FD = pipes[1];
 
                 let mut old: c::sigaction = mem::zeroed();
@@ -368,7 +366,7 @@ impl Process {
         fn waitpid_helper(input: libc::c_int,
                           messages: Receiver<Req>,
                           (read_fd, old): (libc::c_int, c::sigaction)) {
-            set_nonblocking(input, true).ok().unwrap();
+            set_nonblocking(input, true);
             let mut set: c::fd_set = unsafe { mem::zeroed() };
             let mut tv: libc::timeval;
             let mut active = Vec::<(libc::pid_t, Sender<ProcessExit>, u64)>::new();
@@ -399,7 +397,7 @@ impl Process {
                 match unsafe { c::select(max, &mut set, ptr::null_mut(),
                                          ptr::null_mut(), p) } {
                     // interrupted, retry
-                    -1 if os::errno() == libc::EINTR as uint => continue,
+                    -1 if os::errno() == libc::EINTR as i32 => continue,
 
                     // We read something, break out and process
                     1 | 2 => {}
@@ -420,8 +418,15 @@ impl Process {
                             Ok(NewChild(pid, tx, deadline)) => {
                                 active.push((pid, tx, deadline));
                             }
+                            // Once we've been disconnected it means the main
+                            // thread is exiting (at_exit has run). We could
+                            // still have active waiter for other threads, so
+                            // we're just going to drop them all on the floor.
+                            // This means that they won't receive a "you're
+                            // done" message in which case they'll be considered
+                            // as timed out, but more generally errors will
+                            // start propagating.
                             Err(TryRecvError::Disconnected) => {
-                                assert!(active.len() == 0);
                                 break 'outer;
                             }
                             Err(TryRecvError::Empty) => break,
@@ -508,7 +513,7 @@ impl Process {
         // which will wake up the other end at some point, so we just allow this
         // signal to be coalesced with the pending signals on the pipe.
         extern fn sigchld_handler(_signum: libc::c_int) {
-            let msg = 1i;
+            let msg = 1;
             match unsafe {
                 libc::write(WRITE_FD, &msg as *const _ as *const libc::c_void, 1)
             } {
@@ -553,7 +558,7 @@ fn with_argv<T,F>(prog: &CString, args: &[CString],
     cb(ptrs.as_ptr())
 }
 
-fn with_envp<K,V,T,F>(env: Option<&collections::HashMap<K, V>>,
+fn with_envp<K,V,T,F>(env: Option<&HashMap<K, V>>,
                       cb: F)
                       -> T
     where F : FnOnce(*const c_void) -> T,
@@ -569,7 +574,7 @@ fn with_envp<K,V,T,F>(env: Option<&collections::HashMap<K, V>>,
         Some(env) => {
             let mut tmps = Vec::with_capacity(env.len());
 
-            for pair in env.iter() {
+            for pair in env {
                 let mut kv = Vec::new();
                 kv.push_all(pair.0.container_as_bytes());
                 kv.push('=' as u8);
@@ -603,7 +608,9 @@ fn translate_status(status: c_int) -> ProcessExit {
     #[cfg(any(target_os = "macos",
               target_os = "ios",
               target_os = "freebsd",
-              target_os = "dragonfly"))]
+              target_os = "dragonfly",
+              target_os = "bitrig",
+              target_os = "openbsd"))]
     mod imp {
         pub fn WIFEXITED(status: i32) -> bool { (status & 0x7f) == 0 }
         pub fn WEXITSTATUS(status: i32) -> i32 { status >> 8 }

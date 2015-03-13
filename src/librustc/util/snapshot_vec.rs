@@ -14,7 +14,7 @@
 //!
 //! This vector is intended to be used as part of an abstraction, not serve as a complete
 //! abstraction on its own. As such, while it will roll back most changes on its own, it also
-//! supports a `get_mut` operation that gives you an abitrary mutable pointer into the vector. To
+//! supports a `get_mut` operation that gives you an arbitrary mutable pointer into the vector. To
 //! ensure that any changes you make this with this pointer are rolled back, you must invoke
 //! `record` to record any changes you make and also supplying a delegate capable of reversing
 //! those changes.
@@ -22,8 +22,7 @@ use self::UndoLog::*;
 
 use std::mem;
 
-#[derive(PartialEq)]
-pub enum UndoLog<T,U> {
+pub enum UndoLog<D:SnapshotVecDelegate> {
     /// Indicates where a snapshot started.
     OpenSnapshot,
 
@@ -34,31 +33,33 @@ pub enum UndoLog<T,U> {
     NewElem(uint),
 
     /// Variable with given index was changed *from* the given value.
-    SetElem(uint, T),
+    SetElem(uint, D::Value),
 
     /// Extensible set of actions
-    Other(U)
+    Other(D::Undo)
 }
 
-pub struct SnapshotVec<T,U,D> {
-    values: Vec<T>,
-    undo_log: Vec<UndoLog<T,U>>,
+pub struct SnapshotVec<D:SnapshotVecDelegate> {
+    values: Vec<D::Value>,
+    undo_log: Vec<UndoLog<D>>,
     delegate: D
 }
 
 // Snapshots are tokens that should be created/consumed linearly.
-#[allow(missing_copy_implementations)]
 pub struct Snapshot {
     // Length of the undo log at the time the snapshot was taken.
     length: uint,
 }
 
-pub trait SnapshotVecDelegate<T,U> {
-    fn reverse(&mut self, values: &mut Vec<T>, action: U);
+pub trait SnapshotVecDelegate {
+    type Value;
+    type Undo;
+
+    fn reverse(&mut self, values: &mut Vec<Self::Value>, action: Self::Undo);
 }
 
-impl<T,U,D:SnapshotVecDelegate<T,U>> SnapshotVec<T,U,D> {
-    pub fn new(delegate: D) -> SnapshotVec<T,U,D> {
+impl<D:SnapshotVecDelegate> SnapshotVec<D> {
+    pub fn new(delegate: D) -> SnapshotVec<D> {
         SnapshotVec {
             values: Vec::new(),
             undo_log: Vec::new(),
@@ -70,13 +71,13 @@ impl<T,U,D:SnapshotVecDelegate<T,U>> SnapshotVec<T,U,D> {
         !self.undo_log.is_empty()
     }
 
-    pub fn record(&mut self, action: U) {
+    pub fn record(&mut self, action: D::Undo) {
         if self.in_snapshot() {
             self.undo_log.push(Other(action));
         }
     }
 
-    pub fn push(&mut self, elem: T) -> uint {
+    pub fn push(&mut self, elem: D::Value) -> uint {
         let len = self.values.len();
         self.values.push(elem);
 
@@ -87,20 +88,20 @@ impl<T,U,D:SnapshotVecDelegate<T,U>> SnapshotVec<T,U,D> {
         len
     }
 
-    pub fn get<'a>(&'a self, index: uint) -> &'a T {
+    pub fn get<'a>(&'a self, index: uint) -> &'a D::Value {
         &self.values[index]
     }
 
     /// Returns a mutable pointer into the vec; whatever changes you make here cannot be undone
     /// automatically, so you should be sure call `record()` with some sort of suitable undo
     /// action.
-    pub fn get_mut<'a>(&'a mut self, index: uint) -> &'a mut T {
+    pub fn get_mut<'a>(&'a mut self, index: uint) -> &'a mut D::Value {
         &mut self.values[index]
     }
 
     /// Updates the element at the given index. The old value will saved (and perhaps restored) if
     /// a snapshot is active.
-    pub fn set(&mut self, index: uint, new_elem: T) {
+    pub fn set(&mut self, index: uint, new_elem: D::Value) {
         let old_elem = mem::replace(&mut self.values[index], new_elem);
         if self.in_snapshot() {
             self.undo_log.push(SetElem(index, old_elem));
@@ -115,8 +116,8 @@ impl<T,U,D:SnapshotVecDelegate<T,U>> SnapshotVec<T,U,D> {
 
     pub fn actions_since_snapshot(&self,
                                   snapshot: &Snapshot)
-                                  -> &[UndoLog<T,U>] {
-        self.undo_log.index(&(snapshot.length..))
+                                  -> &[UndoLog<D>] {
+        &self.undo_log[snapshot.length..]
     }
 
     fn assert_open_snapshot(&self, snapshot: &Snapshot) {

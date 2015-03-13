@@ -8,12 +8,15 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![allow(unknown_features)]
+#![feature(box_syntax)]
+
 
 fn a_val(x: Box<int>, y: Box<int>) -> int {
     *x + *y
 }
 
 pub fn main() {
-    let z = box 22i;
+    let z: Box<_> = box 22;
     a_val(z.clone(), z.clone());
 }

@@ -8,31 +8,32 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::fmt::Show;
+use std::fmt::Debug;
 use std::default::Default;
+use std::marker::MarkerTrait;
 
 // Test that two blanket impls conflict (at least without negative
 // bounds).  After all, some other crate could implement Even or Odd
 // for the same type (though this crate doesn't).
 
 trait MyTrait {
-    fn get(&self) -> uint;
+    fn get(&self) -> usize;
 }
 
-trait Even { }
+trait Even : MarkerTrait { }
 
-trait Odd { }
+trait Odd : MarkerTrait { }
 
-impl Even for int { }
+impl Even for isize { }
 
-impl Odd for uint { }
+impl Odd for usize { }
 
 impl<T:Even> MyTrait for T { //~ ERROR E0119
-    fn get(&self) -> uint { 0 }
+    fn get(&self) -> usize { 0 }
 }
 
 impl<T:Odd> MyTrait for T {
-    fn get(&self) -> uint { 0 }
+    fn get(&self) -> usize { 0 }
 }
 
 fn main() { }

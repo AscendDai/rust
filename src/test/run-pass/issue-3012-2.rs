@@ -10,6 +10,8 @@
 
 // aux-build:issue-3012-1.rs
 
+#![allow(unknown_features)]
+#![feature(box_syntax)]
 
 extern crate socketlib;
 extern crate libc;
@@ -18,5 +20,5 @@ use socketlib::socket;
 
 pub fn main() {
     let fd: libc::c_int = 1 as libc::c_int;
-    let _sock = box socket::socket_handle(fd);
+    let _sock: Box<_> = box socket::socket_handle(fd);
 }

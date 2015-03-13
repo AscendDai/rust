@@ -9,10 +9,12 @@
 // except according to those terms.
 
 #![allow(dead_assignment)]
+#![allow(unknown_features)]
+#![feature(box_syntax)]
 
 pub fn main() {
-    let i = box 1i;
-    let mut j = box 2i;
+    let i: Box<_> = box 1;
+    let mut j: Box<_> = box 2;
     // Should drop the previous value of j
     j = i;
     assert_eq!(*j, 1);

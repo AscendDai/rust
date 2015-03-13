@@ -25,26 +25,26 @@ use self::Message::*;
 use core::prelude::*;
 
 use core::cmp;
-use core::int;
-use thread::Thread;
+use core::isize;
+use thread;
 
-use sync::atomic::{AtomicInt, AtomicUint, Ordering, AtomicBool};
+use sync::atomic::{AtomicIsize, AtomicUsize, Ordering, AtomicBool};
 use sync::mpsc::Receiver;
 use sync::mpsc::blocking::{self, SignalToken};
 use sync::mpsc::spsc_queue as spsc;
 
-const DISCONNECTED: int = int::MIN;
+const DISCONNECTED: isize = isize::MIN;
 #[cfg(test)]
-const MAX_STEALS: int = 5;
+const MAX_STEALS: isize = 5;
 #[cfg(not(test))]
-const MAX_STEALS: int = 1 << 20;
+const MAX_STEALS: isize = 1 << 20;
 
 pub struct Packet<T> {
     queue: spsc::Queue<Message<T>>, // internal queue for all message
 
-    cnt: AtomicInt, // How many items are on this channel
-    steals: int, // How many times has a port received without blocking?
-    to_wake: AtomicUint, // SignalToken for the blocked thread to wake up
+    cnt: AtomicIsize, // How many items are on this channel
+    steals: isize, // How many times has a port received without blocking?
+    to_wake: AtomicUsize, // SignalToken for the blocked thread to wake up
 
     port_dropped: AtomicBool, // flag if the channel has been destroyed.
 }
@@ -79,9 +79,9 @@ impl<T: Send> Packet<T> {
         Packet {
             queue: unsafe { spsc::Queue::new(128) },
 
-            cnt: AtomicInt::new(0),
+            cnt: AtomicIsize::new(0),
             steals: 0,
-            to_wake: AtomicUint::new(0),
+            to_wake: AtomicUsize::new(0),
 
             port_dropped: AtomicBool::new(false),
         }
@@ -146,7 +146,7 @@ impl<T: Send> Packet<T> {
         let ptr = self.to_wake.load(Ordering::SeqCst);
         self.to_wake.store(0, Ordering::SeqCst);
         assert!(ptr != 0);
-        unsafe { SignalToken::cast_from_uint(ptr) }
+        unsafe { SignalToken::cast_from_usize(ptr) }
     }
 
     // Decrements the count on the channel for a sleeper, returning the sleeper
@@ -154,7 +154,7 @@ impl<T: Send> Packet<T> {
     // steals into account.
     fn decrement(&mut self, token: SignalToken) -> Result<(), SignalToken> {
         assert_eq!(self.to_wake.load(Ordering::SeqCst), 0);
-        let ptr = unsafe { token.cast_to_uint() };
+        let ptr = unsafe { token.cast_to_usize() };
         self.to_wake.store(ptr, Ordering::SeqCst);
 
         let steals = self.steals;
@@ -171,7 +171,7 @@ impl<T: Send> Packet<T> {
         }
 
         self.to_wake.store(0, Ordering::SeqCst);
-        Err(unsafe { SignalToken::cast_from_uint(ptr) })
+        Err(unsafe { SignalToken::cast_from_usize(ptr) })
     }
 
     pub fn recv(&mut self) -> Result<T, Failure<T>> {
@@ -338,7 +338,7 @@ impl<T: Send> Packet<T> {
         // upgrade pending, then go through the whole recv rigamarole to update
         // the internal state.
         match self.queue.peek() {
-            Some(&GoUp(..)) => {
+            Some(&mut GoUp(..)) => {
                 match self.recv() {
                     Err(Upgraded(port)) => Err(port),
                     _ => unreachable!(),
@@ -350,7 +350,7 @@ impl<T: Send> Packet<T> {
     }
 
     // increment the count on the channel (used for selection)
-    fn bump(&mut self, amt: int) -> int {
+    fn bump(&mut self, amt: isize) -> isize {
         match self.cnt.fetch_add(amt, Ordering::SeqCst) {
             DISCONNECTED => {
                 self.cnt.store(DISCONNECTED, Ordering::SeqCst);
@@ -367,7 +367,7 @@ impl<T: Send> Packet<T> {
             Ok(()) => SelSuccess,
             Err(token) => {
                 let ret = match self.queue.peek() {
-                    Some(&GoUp(..)) => {
+                    Some(&mut GoUp(..)) => {
                         match self.queue.pop() {
                             Some(GoUp(port)) => SelUpgraded(token, port),
                             _ => unreachable!(),
@@ -440,7 +440,7 @@ impl<T: Send> Packet<T> {
                 drop(self.take_to_wake());
             } else {
                 while self.to_wake.load(Ordering::SeqCst) != 0 {
-                    Thread::yield_now();
+                    thread::yield_now();
                 }
             }
             assert_eq!(self.steals, 0);
@@ -457,7 +457,7 @@ impl<T: Send> Packet<T> {
         // upgraded port.
         if has_data {
             match self.queue.peek() {
-                Some(&GoUp(..)) => {
+                Some(&mut GoUp(..)) => {
                     match self.queue.pop() {
                         Some(GoUp(port)) => Err(port),
                         _ => unreachable!(),

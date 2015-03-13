@@ -9,4 +9,5 @@
 // except according to those terms.
 
 // error-pattern: panic
-fn main() { box panic!(); }
+
+fn main() { Box::new(panic!()); }

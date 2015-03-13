@@ -9,7 +9,6 @@
 // except according to those terms.
 
 
-#![allow(experimental)]
 #![feature(simd)]
 
 pub fn main() {

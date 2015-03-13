@@ -12,6 +12,9 @@
 // blanket impl for T:Copy coexists with an impl for Box<T>, because
 // Box does not impl Copy.
 
+#![allow(unknown_features)]
+#![feature(box_syntax)]
+
 trait Get {
     fn get(&self) -> Self;
 }
@@ -32,5 +35,5 @@ fn main() {
     assert_eq!(get_it(&1_u32), 1_u32);
     assert_eq!(get_it(&1_u16), 1_u16);
     assert_eq!(get_it(&Some(1_u16)), Some(1_u16));
-    assert_eq!(get_it(&box 1i), box 1i);
+    assert_eq!(get_it(&Box::new(1)), Box::new(1));
 }

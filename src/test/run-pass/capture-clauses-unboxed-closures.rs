@@ -11,14 +11,14 @@
 #![feature(unboxed_closures)]
 
 fn each<'a,T,F:FnMut(&'a T)>(x: &'a [T], mut f: F) {
-    for val in x.iter() {
+    for val in x {
         f(val)
     }
 }
 
 fn main() {
-    let mut sum = 0u;
-    let elems = [ 1u, 2, 3, 4, 5 ];
-    each(&elems, |&mut: val: &uint| sum += *val);
+    let mut sum = 0;
+    let elems = [ 1, 2, 3, 4, 5 ];
+    each(&elems, |val: &uint| sum += *val);
     assert_eq!(sum, 15);
 }

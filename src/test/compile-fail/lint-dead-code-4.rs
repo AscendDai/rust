@@ -11,18 +11,20 @@
 #![allow(unused_variables)]
 #![allow(non_camel_case_types)]
 #![deny(dead_code)]
+#![feature(libc)]
+#![feature(core)]
 
 extern crate libc;
 
 use std::num::Int;
 
 struct Foo {
-    x: uint,
+    x: usize,
     b: bool, //~ ERROR: struct field is never used
     marker: std::marker::NoCopy
 }
 
-fn field_read(f: Foo) -> uint {
+fn field_read(f: Foo) -> usize {
     f.x.pow(2)
 }
 
@@ -30,7 +32,7 @@ enum XYZ {
     X, //~ ERROR variant is never used
     Y { //~ ERROR variant is never used
         a: String,
-        b: int //~ ERROR: struct field is never used
+        b: isize //~ ERROR: struct field is never used
     },
     Z
 }
@@ -43,7 +45,7 @@ fn field_match_in_patterns(b: XYZ) -> String {
 }
 
 struct Bar {
-    x: uint, //~ ERROR: struct field is never used
+    x: usize, //~ ERROR: struct field is never used
     b: bool,
     _guard: ()
 }
@@ -61,6 +63,6 @@ fn field_match_in_let(f: Bar) -> bool {
 fn main() {
     field_read(Foo { x: 1, b: false, marker: std::marker::NoCopy });
     field_match_in_patterns(XYZ::Z);
-    field_match_in_let(Bar { x: 42u, b: true, _guard: () });
+    field_match_in_let(Bar { x: 42, b: true, _guard: () });
     let _ = Baz { x: 0 };
 }

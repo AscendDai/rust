@@ -14,15 +14,15 @@
 use std::ops::{Index, IndexMut};
 
 struct Foo {
-    x: int,
-    y: int,
+    x: isize,
+    y: isize,
 }
 
 impl Index<String> for Foo {
-    type Output = int;
+    type Output = isize;
 
-    fn index<'a>(&'a self, z: &String) -> &'a int {
-        if z.as_slice() == "x" {
+    fn index<'a>(&'a self, z: &String) -> &'a isize {
+        if *z == "x" {
             &self.x
         } else {
             &self.y
@@ -31,10 +31,8 @@ impl Index<String> for Foo {
 }
 
 impl IndexMut<String> for Foo {
-    type Output = int;
-
-    fn index_mut<'a>(&'a mut self, z: &String) -> &'a mut int {
-        if z.as_slice() == "x" {
+    fn index_mut<'a>(&'a mut self, z: &String) -> &'a mut isize {
+        if *z == "x" {
             &mut self.x
         } else {
             &mut self.y

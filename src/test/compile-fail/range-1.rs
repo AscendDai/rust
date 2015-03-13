@@ -9,19 +9,18 @@
 // except according to those terms.
 
 // Test range syntax - type errors.
-#![feature(slicing_syntax)]
 
 pub fn main() {
     // Mixed types.
-    let _ = 0u..10i;
+    let _ = 0u32..10i32;
     //~^ ERROR start and end of range have incompatible types
 
     // Float => does not implement iterator.
     for i in 0f32..42f32 {}
-    //~^ ERROR `for` loop expression has type `core::ops::Range<f32>` which does not implement
+    //~^ ERROR the trait `core::num::Int` is not implemented for the type `f32`
 
     // Unsized type.
-    let arr: &[_] = &[1u, 2, 3];
-    let range = (*arr)..;
+    let arr: &[_] = &[1, 2, 3];
+    let range = *arr..;
     //~^ ERROR the trait `core::marker::Sized` is not implemented
 }

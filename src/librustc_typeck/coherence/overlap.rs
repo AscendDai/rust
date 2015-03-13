@@ -17,16 +17,26 @@ use middle::infer::{self, new_infer_ctxt};
 use syntax::ast::{DefId};
 use syntax::ast::{LOCAL_CRATE};
 use syntax::ast;
-use syntax::codemap::{Span};
+use syntax::ast_util;
+use syntax::visit;
+use syntax::codemap::Span;
+use util::nodemap::DefIdMap;
 use util::ppaux::Repr;
 
 pub fn check(tcx: &ty::ctxt) {
-    let overlap = OverlapChecker { tcx: tcx };
+    let mut overlap = OverlapChecker { tcx: tcx, default_impls: DefIdMap() };
     overlap.check_for_overlapping_impls();
+
+    // this secondary walk specifically checks for impls of defaulted
+    // traits, for which additional overlap rules exist
+    visit::walk_crate(&mut overlap, tcx.map.krate());
 }
 
 struct OverlapChecker<'cx, 'tcx:'cx> {
-    tcx: &'cx ty::ctxt<'tcx>
+    tcx: &'cx ty::ctxt<'tcx>,
+
+    // maps from a trait def-id to an impl id
+    default_impls: DefIdMap<ast::NodeId>,
 }
 
 impl<'cx, 'tcx> OverlapChecker<'cx, 'tcx> {
@@ -38,36 +48,34 @@ impl<'cx, 'tcx> OverlapChecker<'cx, 'tcx> {
         // check_for_overlapping_impls_of_trait() check, since that
         // check can populate this table further with impls from other
         // crates.
-        let trait_def_ids: Vec<ast::DefId> =
-            self.tcx.trait_impls.borrow().keys().map(|&d| d).collect();
+        let trait_def_ids: Vec<(ast::DefId, Vec<ast::DefId>)> =
+            self.tcx.trait_impls.borrow().iter().map(|(&k, v)| {
+                // FIXME -- it seems like this method actually pushes
+                // duplicate impls onto the list
+                ty::populate_implementations_for_trait_if_necessary(self.tcx, k);
+                (k, v.borrow().clone())
+            }).collect();
 
-        for trait_def_id in trait_def_ids.iter() {
-            self.check_for_overlapping_impls_of_trait(*trait_def_id);
+        for &(trait_def_id, ref impls) in &trait_def_ids {
+            self.check_for_overlapping_impls_of_trait(trait_def_id, impls);
         }
     }
 
     fn check_for_overlapping_impls_of_trait(&self,
-                                            trait_def_id: ast::DefId)
+                                            trait_def_id: ast::DefId,
+                                            trait_impls: &Vec<ast::DefId>)
     {
         debug!("check_for_overlapping_impls_of_trait(trait_def_id={})",
                trait_def_id.repr(self.tcx));
 
-        // FIXME -- it seems like this method actually pushes
-        // duplicate impls onto the list
-        ty::populate_implementations_for_trait_if_necessary(self.tcx,
-                                                            trait_def_id);
-
-        let mut impls = Vec::new();
-        self.push_impls_of_trait(trait_def_id, &mut impls);
-
-        for (i, &impl1_def_id) in impls.iter().enumerate() {
+        for (i, &impl1_def_id) in trait_impls.iter().enumerate() {
             if impl1_def_id.krate != ast::LOCAL_CRATE {
                 // we don't need to check impls if both are external;
                 // that's the other crate's job.
                 continue;
             }
 
-            for &impl2_def_id in impls.slice_from(i+1).iter() {
+            for &impl2_def_id in &trait_impls[(i+1)..] {
                 self.check_if_impls_overlap(trait_def_id,
                                             impl1_def_id,
                                             impl2_def_id);
@@ -92,33 +100,60 @@ impl<'cx, 'tcx> OverlapChecker<'cx, 'tcx> {
             return;
         }
 
-        span_err!(self.tcx.sess, self.span_of_impl(impl1_def_id), E0119,
+        self.report_overlap_error(trait_def_id, impl1_def_id, impl2_def_id);
+    }
+
+    fn report_overlap_error(&self, trait_def_id: ast::DefId,
+                            impl1: ast::DefId, impl2: ast::DefId) {
+
+        span_err!(self.tcx.sess, self.span_of_impl(impl1), E0119,
                   "conflicting implementations for trait `{}`",
                   ty::item_path_str(self.tcx, trait_def_id));
 
-        if impl2_def_id.krate == ast::LOCAL_CRATE {
-            span_note!(self.tcx.sess, self.span_of_impl(impl2_def_id),
+        self.report_overlap_note(impl1, impl2);
+    }
+
+    fn report_overlap_note(&self, impl1: ast::DefId, impl2: ast::DefId) {
+
+        if impl2.krate == ast::LOCAL_CRATE {
+            span_note!(self.tcx.sess, self.span_of_impl(impl2),
                        "note conflicting implementation here");
         } else {
             let crate_store = &self.tcx.sess.cstore;
-            let cdata = crate_store.get_crate_data(impl2_def_id.krate);
-            span_note!(self.tcx.sess, self.span_of_impl(impl1_def_id),
+            let cdata = crate_store.get_crate_data(impl2.krate);
+            span_note!(self.tcx.sess, self.span_of_impl(impl1),
                        "conflicting implementation in crate `{}`",
                        cdata.name);
-        }
-    }
-
-    fn push_impls_of_trait(&self,
-                           trait_def_id: ast::DefId,
-                           out: &mut Vec<ast::DefId>) {
-        match self.tcx.trait_impls.borrow().get(&trait_def_id) {
-            Some(impls) => { out.push_all(impls.borrow().as_slice()); }
-            None => { /* no impls */ }
         }
     }
 
     fn span_of_impl(&self, impl_did: ast::DefId) -> Span {
         assert_eq!(impl_did.krate, ast::LOCAL_CRATE);
         self.tcx.map.span(impl_did.node)
+    }
+}
+
+
+impl<'cx, 'tcx,'v> visit::Visitor<'v> for OverlapChecker<'cx, 'tcx> {
+    fn visit_item(&mut self, item: &'v ast::Item) {
+        match item.node {
+            ast::ItemDefaultImpl(_, _) => {
+                // look for another default impl; note that due to the
+                // general orphan/coherence rules, it must always be
+                // in this crate.
+                let impl_def_id = ast_util::local_def(item.id);
+                let trait_ref = ty::impl_trait_ref(self.tcx, impl_def_id).unwrap();
+                let prev_default_impl = self.default_impls.insert(trait_ref.def_id, item.id);
+                match prev_default_impl {
+                    Some(prev_id) => {
+                        self.report_overlap_error(trait_ref.def_id,
+                                                  impl_def_id,
+                                                  ast_util::local_def(prev_id));
+                    }
+                    None => { }
+                }
+            }
+            _ => {}
+        }
     }
 }

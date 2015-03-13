@@ -13,9 +13,10 @@
 use diagnostic;
 use diagnostic::Emitter;
 use driver;
+use rustc_lint;
 use rustc_resolve as resolve;
 use rustc_typeck::middle::lang_items;
-use rustc_typeck::middle::region::{self, CodeExtent};
+use rustc_typeck::middle::region::{self, CodeExtent, DestructionScopeData};
 use rustc_typeck::middle::resolve_lifetime;
 use rustc_typeck::middle::stability;
 use rustc_typeck::middle::subst;
@@ -43,7 +44,7 @@ struct RH<'a> {
     sub: &'a [RH<'a>]
 }
 
-static EMPTY_SOURCE_STR: &'static str = "#![no_std]";
+const EMPTY_SOURCE_STR: &'static str = "#![feature(no_std)] #![no_std]";
 
 struct ExpectErrorEmitter {
     messages: Vec<String>
@@ -56,12 +57,12 @@ fn remove_message(e: &mut ExpectErrorEmitter, msg: &str, lvl: Level) {
     }
 
     debug!("Error: {}", msg);
-    match e.messages.iter().position(|m| msg.contains(m.as_slice())) {
+    match e.messages.iter().position(|m| msg.contains(m)) {
         Some(i) => {
             e.messages.remove(i);
         }
         None => {
-            panic!("Unexpected error: {} Expected: {}",
+            panic!("Unexpected error: {} Expected: {:?}",
                   msg, e.messages);
         }
     }
@@ -99,15 +100,16 @@ fn test_env<F>(source_string: &str,
 {
     let mut options =
         config::basic_options();
-    options.debugging_opts |= config::VERBOSE;
+    options.debugging_opts.verbose = true;
     let codemap =
         CodeMap::new();
     let diagnostic_handler =
-        diagnostic::mk_handler(emitter);
+        diagnostic::mk_handler(true, emitter);
     let span_diagnostic_handler =
         diagnostic::mk_span_handler(diagnostic_handler, codemap);
 
     let sess = session::build_session_(options, None, span_diagnostic_handler);
+    rustc_lint::register_builtins(&mut sess.lint_store.borrow_mut(), Some(&sess));
     let krate_config = Vec::new();
     let input = config::Input::Str(source_string.to_string());
     let krate = driver::phase_1_parse_input(&sess, krate_config, &input);
@@ -115,27 +117,25 @@ fn test_env<F>(source_string: &str,
                     .expect("phase 2 aborted");
 
     let mut forest = ast_map::Forest::new(krate);
+    let arenas = ty::CtxtArenas::new();
     let ast_map = driver::assign_node_ids_and_map(&sess, &mut forest);
     let krate = ast_map.krate();
 
     // run just enough stuff to build a tcx:
     let lang_items = lang_items::collect_language_items(krate, &sess);
-    let resolve::CrateMap { def_map, freevars, capture_mode_map, .. } =
+    let resolve::CrateMap { def_map, freevars, .. } =
         resolve::resolve_crate(&sess, &ast_map, &lang_items, krate, resolve::MakeGlobMap::No);
     let named_region_map = resolve_lifetime::krate(&sess, krate, &def_map);
     let region_map = region::resolve_crate(&sess, krate);
-    let stability_index = stability::Index::build(krate);
-    let arenas = ty::CtxtArenas::new();
     let tcx = ty::mk_ctxt(sess,
                           &arenas,
                           def_map,
                           named_region_map,
                           ast_map,
                           freevars,
-                          capture_mode_map,
                           region_map,
                           lang_items,
-                          stability_index);
+                          stability::Index::new(krate));
     let infcx = infer::new_infer_ctxt(&tcx);
     body(Env { infcx: &infcx });
     infcx.resolve_regions_and_report_errors(ast::CRATE_NODE_ID);
@@ -148,7 +148,7 @@ impl<'a, 'tcx> Env<'a, 'tcx> {
     }
 
     pub fn create_region_hierarchy(&self, rh: &RH) {
-        for child_rh in rh.sub.iter() {
+        for child_rh in rh.sub {
             self.create_region_hierarchy(child_rh);
             self.infcx.tcx.region_maps.record_encl_scope(
                 CodeExtent::from_node_id(child_rh.id),
@@ -182,7 +182,7 @@ impl<'a, 'tcx> Env<'a, 'tcx> {
                       names: &[String])
                       -> Option<ast::NodeId> {
             assert!(idx < names.len());
-            for item in m.items.iter() {
+            for item in &m.items {
                 if item.ident.user_string(this.infcx.tcx) == names[idx] {
                     return search(this, &**item, idx+1, names);
                 }
@@ -200,6 +200,7 @@ impl<'a, 'tcx> Env<'a, 'tcx> {
             }
 
             return match it.node {
+                ast::ItemUse(..) | ast::ItemExternCrate(..) |
                 ast::ItemConst(..) | ast::ItemStatic(..) | ast::ItemFn(..) |
                 ast::ItemForeignMod(..) | ast::ItemTy(..) => {
                     None
@@ -207,7 +208,7 @@ impl<'a, 'tcx> Env<'a, 'tcx> {
 
                 ast::ItemEnum(..) | ast::ItemStruct(..) |
                 ast::ItemTrait(..) | ast::ItemImpl(..) |
-                ast::ItemMac(..) => {
+                ast::ItemMac(..) | ast::ItemDefaultImpl(..) => {
                     None
                 }
 
@@ -255,7 +256,7 @@ impl<'a, 'tcx> Env<'a, 'tcx> {
                 output_ty: Ty<'tcx>)
                 -> Ty<'tcx>
     {
-        let input_args = input_tys.iter().map(|ty| *ty).collect();
+        let input_args = input_tys.iter().cloned().collect();
         ty::mk_bare_fn(self.infcx.tcx,
                        None,
                        self.infcx.tcx.mk_bare_fn(ty::BareFnTy {
@@ -279,7 +280,7 @@ impl<'a, 'tcx> Env<'a, 'tcx> {
 
     pub fn t_param(&self, space: subst::ParamSpace, index: u32) -> Ty<'tcx> {
         let name = format!("T{}", index);
-        ty::mk_param(self.infcx.tcx, space, index, token::intern(name.index(&FullRange)))
+        ty::mk_param(self.infcx.tcx, space, index, token::intern(&name[..]))
     }
 
     pub fn re_early_bound(&self,
@@ -326,7 +327,7 @@ impl<'a, 'tcx> Env<'a, 'tcx> {
     }
 
     pub fn re_free(&self, nid: ast::NodeId, id: u32) -> ty::Region {
-        ty::ReFree(ty::FreeRegion { scope: CodeExtent::from_node_id(nid),
+        ty::ReFree(ty::FreeRegion { scope: DestructionScopeData::new(nid),
                                     bound_region: ty::BrAnon(id)})
     }
 
@@ -807,11 +808,11 @@ fn walk_ty() {
         let tup2_ty = ty::mk_tup(tcx, vec!(tup1_ty, tup1_ty, uint_ty));
         let uniq_ty = ty::mk_uniq(tcx, tup2_ty);
         let walked: Vec<_> = uniq_ty.walk().collect();
-        assert_eq!(vec!(uniq_ty,
-                        tup2_ty,
-                        tup1_ty, int_ty, uint_ty, int_ty, uint_ty,
-                        tup1_ty, int_ty, uint_ty, int_ty, uint_ty,
-                        uint_ty),
+        assert_eq!([uniq_ty,
+                    tup2_ty,
+                    tup1_ty, int_ty, uint_ty, int_ty, uint_ty,
+                    tup1_ty, int_ty, uint_ty, int_ty, uint_ty,
+                    uint_ty],
                    walked);
     })
 }

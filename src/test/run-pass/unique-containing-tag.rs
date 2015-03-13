@@ -8,10 +8,13 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![allow(unknown_features)]
+#![feature(box_syntax)]
+
 pub fn main() {
     enum t { t1(int), t2(int), }
 
-    let _x = box t::t1(10);
+    let _x: Box<_> = box t::t1(10);
 
     /*alt *x {
       t1(a) {

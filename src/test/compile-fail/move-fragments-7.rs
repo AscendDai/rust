@@ -19,7 +19,9 @@
 // both moving out of the structure (i.e. reading `*p.x`) and writing
 // into the container (i.e. writing `*p.x`).
 
-pub struct D { d: int }
+#![feature(rustc_attrs)]
+
+pub struct D { d: isize }
 impl Drop for D { fn drop(&mut self) { } }
 
 pub struct Pair<X,Y> { x: X, y: Y }

@@ -10,6 +10,8 @@
 
 // Verifies all possible restrictions for statics values.
 
+#![feature(box_syntax)]
+
 use std::marker;
 
 struct WithDtor;
@@ -24,7 +26,7 @@ impl Drop for WithDtor {
 // 3. Expr calls with unsafe arguments for statics are rejected
 enum SafeEnum {
     Variant1,
-    Variant2(int),
+    Variant2(isize),
     Variant3(WithDtor),
     Variant4(String)
 }
@@ -43,7 +45,7 @@ static STATIC3: SafeEnum = SafeEnum::Variant3(WithDtor);
 // a destructor.
 enum UnsafeEnum {
     Variant5,
-    Variant6(int)
+    Variant6(isize)
 }
 
 impl Drop for UnsafeEnum {
@@ -97,7 +99,7 @@ static STATIC10: UnsafeStruct = UnsafeStruct;
 struct MyOwned;
 
 static STATIC11: Box<MyOwned> = box MyOwned;
-//~^ ERROR statics are not allowed to have custom pointers
+//~^ ERROR allocations are not allowed in statics
 
 // The following examples test that mutable structs are just forbidden
 // to have types with destructors
@@ -115,26 +117,27 @@ static mut STATIC14: SafeStruct = SafeStruct {
 //~^ ERROR mutable statics are not allowed to have destructors
     field1: SafeEnum::Variant1,
     field2: SafeEnum::Variant4("str".to_string())
+//~^ ERROR static contains unimplemented expression type
 };
 
 static STATIC15: &'static [Box<MyOwned>] = &[
-    box MyOwned, //~ ERROR statics are not allowed to have custom pointers
-    box MyOwned, //~ ERROR statics are not allowed to have custom pointers
+    box MyOwned, //~ ERROR allocations are not allowed in statics
+    box MyOwned, //~ ERROR allocations are not allowed in statics
 ];
 
 static STATIC16: (&'static Box<MyOwned>, &'static Box<MyOwned>) = (
-    &box MyOwned, //~ ERROR statics are not allowed to have custom pointers
-    &box MyOwned, //~ ERROR statics are not allowed to have custom pointers
+    &box MyOwned, //~ ERROR allocations are not allowed in statics
+    &box MyOwned, //~ ERROR allocations are not allowed in statics
 );
 
 static mut STATIC17: SafeEnum = SafeEnum::Variant1;
 //~^ ERROR mutable statics are not allowed to have destructors
 
-static STATIC19: Box<int> =
+static STATIC19: Box<isize> =
     box 3;
-//~^ ERROR statics are not allowed to have custom pointers
+//~^ ERROR allocations are not allowed in statics
 
 pub fn main() {
-    let y = { static x: Box<int> = box 3; x };
-    //~^ ERROR statics are not allowed to have custom pointers
+    let y = { static x: Box<isize> = box 3; x };
+    //~^ ERROR allocations are not allowed in statics
 }

@@ -8,6 +8,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![allow(unknown_features)]
 #![feature(unboxed_closures)]
 
 /**
@@ -33,7 +34,7 @@ mod map_reduce {
     enum ctrl_proto { find_reducer(Vec<u8>, Sender<int>), mapper_done, }
 
     fn start_mappers(ctrl: Sender<ctrl_proto>, inputs: Vec<String>) {
-        for i in inputs.iter() {
+        for i in &inputs {
             let ctrl = ctrl.clone();
             let i = i.clone();
             Thread::spawn(move|| map_task(ctrl.clone(), i.clone()) );
@@ -59,7 +60,8 @@ mod map_reduce {
         }
 
         let ctrl_clone = ctrl.clone();
-        ::map(input, box |a,b| emit(&mut intermediates, ctrl.clone(), a, b) );
+        // FIXME (#22405): Replace `Box::new` with `box` here when/if possible.
+        ::map(input, Box::new(|a,b| emit(&mut intermediates, ctrl.clone(), a, b)));
         ctrl_clone.send(ctrl_proto::mapper_done).unwrap();
     }
 
@@ -82,8 +84,7 @@ mod map_reduce {
               ctrl_proto::mapper_done => { num_mappers -= 1; }
               ctrl_proto::find_reducer(k, cc) => {
                 let mut c;
-                match reducers.get(&str::from_utf8(
-                        k.as_slice()).unwrap().to_string()) {
+                match reducers.get(&str::from_utf8(&k).unwrap().to_string()) {
                   Some(&_c) => { c = _c; }
                   None => { c = 0; }
                 }

@@ -9,6 +9,8 @@
 // except according to those terms.
 
 #![allow(unnecessary_allocation)]
+#![allow(unknown_features)]
+#![feature(box_syntax)]
 
 // Tests for a previous bug that occurred due to an interaction
 // between struct field initialization and the auto-coercion
@@ -32,7 +34,7 @@ pub fn main() {
         bar: box 32,
     };
     Thing1 {
-        baz: Vec::new().as_slice(),
+        baz: &Vec::new(),
         bar: box 32,
     };
     let _t2_fixed = Thing2 {
@@ -40,7 +42,7 @@ pub fn main() {
         bar: 32,
     };
     Thing2 {
-        baz: Vec::new().as_slice(),
+        baz: &Vec::new(),
         bar: 32,
     };
 }
